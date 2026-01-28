@@ -2,6 +2,9 @@ package projection
 
 import (
 	"bm-lrs/pkg/geom"
+	"bm-lrs/pkg/route"
+	"io"
+	"os"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -90,6 +93,37 @@ func TestTransform(t *testing.T) {
 					defer test_p.Release()
 				},
 			)
+		},
+	)
+
+	t.Run(
+		"project LRSRoute object", func(t *testing.T) {
+			lambert_wkt := `PROJCS["Indonesia Lambert Conformal Conic",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137.0,298.257223563]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]],PROJECTION["Lambert_Conformal_Conic"],PARAMETER["False_Easting",0.0],PARAMETER["False_Northing",0.0],PARAMETER["Central_Meridian",115.0],PARAMETER["Standard_Parallel_1",2.0],PARAMETER["Standard_Parallel_2",-7.0],PARAMETER["Latitude_Of_Origin",0.0],UNIT["Meter",1.0]]`
+
+			// Read test data JSON
+			// Parse from ESRI GeoJSON fetched from a feature service.
+			jsonFile, err := os.Open("../route/testdata/lrs_01001.json")
+			if err != nil {
+				t.Error(err)
+			}
+
+			defer jsonFile.Close()
+
+			jsonByte, _ := io.ReadAll(jsonFile)
+
+			lrs := route.NewLRSRouteFromESRIGeoJSON(
+				"01001",
+				jsonByte,
+				0,
+				lambert_wkt,
+			)
+			defer lrs.Release()
+
+			new_lrs, err := Transform(&lrs, "EPSG:4326", true)
+			if err != nil {
+				t.Error(err)
+			}
+			new_lrs.Release()
 		},
 	)
 }
