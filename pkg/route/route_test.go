@@ -3,6 +3,7 @@ package route
 import (
 	"bm-lrs/pkg/geom"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -25,6 +26,7 @@ func TestLRSRoute(t *testing.T) {
 	}
 
 	conn, err := c.Connect(context.Background())
+	db := sql.OpenDB(c)
 
 	if err != nil {
 		log.Fatal(err)
@@ -171,6 +173,12 @@ func TestLRSRoute(t *testing.T) {
 
 			release, err := ar.RegisterView(rr, lrs.ViewName())
 			defer release()
+
+			// Write to parquet file for evaluation
+			_, err = db.QueryContext(context.Background(), fmt.Sprintf("copy (%s) to 'testdata/lrs_01001_segment.parquet' (FORMAT parquet);", lrs.SegmentQuery()))
+			if err != nil {
+				t.Error(err)
+			}
 
 			out_reader, err := ar.QueryContext(context.Background(), lrs.SegmentQuery())
 			if err != nil {
