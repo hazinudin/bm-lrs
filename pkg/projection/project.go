@@ -120,17 +120,6 @@ func Transform(obj geom.Geometry, crs string, inverted bool) (geom.Geometry, err
 
 		recs = append(recs, rec)
 
-		// num_rows := int(rec.NumRows())
-		// num_cols := int(rec.NumCols())
-
-		// for i := range num_rows {
-		// 	for colIdx := range num_cols {
-		// 		col := rec.Column(colIdx)
-
-		// 		fmt.Printf("col %s: %s", rec.ColumnName(colIdx), col.ValueStr(i))
-		// 	}
-		// }
-
 		switch obj.GetGeometryType() {
 
 		case geom.LRS:
