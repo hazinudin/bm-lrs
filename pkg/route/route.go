@@ -164,8 +164,9 @@ func (l *LRSRoute) SegmentQuery() string {
 	{{.LatCol}}-(mvgradient*{{.LongCol}})as c
 	from
 	(
-		select *
-		{{.LongCol}}, {{.LatCol}},
+		select 
+		* exclude({{.LatCol}}, {{.LongCol}}, {{.MvalCol}}, {{.VertexSeqCol}}),
+		{{.LongCol}}, {{.LatCol}}, {{.MvalCol}}, {{.VertexSeqCol}},
 		LEAD({{.LongCol}}, 1, null) over (order by {{.VertexSeqCol}}) as {{.LongCol}}1,
 		LEAD({{.LatCol}}, 1, null) over (order by {{.VertexSeqCol}}) as {{.LatCol}}1,
 		LEAD({{.MvalCol}}, 1, null) over (order by {{.VertexSeqCol}}) as {{.MvalCol}}1
