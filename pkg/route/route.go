@@ -27,7 +27,7 @@ func NewLRSRoute(route_id string, recs []arrow.RecordBatch, crs string) LRSRoute
 		route_id:        route_id,
 		records:         recs,
 		LatitudeColumn:  "LAT",
-		LongitudeColumn: "LONG",
+		LongitudeColumn: "LON",
 		MValueColumn:    "MVAL",
 		VertexSeqColumn: "VERTEX_SEQ",
 		crs:             crs,
@@ -53,7 +53,7 @@ func NewLRSRouteFromESRIGeoJSON(route_id string, jsonbyte []byte, feature_idx in
 	schema := arrow.NewSchema(
 		[]arrow.Field{
 			{Name: "LAT", Type: arrow.PrimitiveTypes.Float64},
-			{Name: "LONG", Type: arrow.PrimitiveTypes.Float64},
+			{Name: "LON", Type: arrow.PrimitiveTypes.Float64},
 			{Name: "MVAL", Type: arrow.PrimitiveTypes.Float64},
 			{Name: "VERTEX_SEQ", Type: arrow.PrimitiveTypes.Int32},
 		},
