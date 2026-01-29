@@ -156,6 +156,15 @@ func (l *LRSRoute) ViewName() string {
 	return "lrs"
 }
 
+// If the data is materialized into a file
+func (l *LRSRoute) IsMaterialized() bool {
+	if l.source_files != nil {
+		return true
+	} else {
+		return false
+	}
+}
+
 // LRS segment along with M-Value gradient and coefficient query
 func (l *LRSRoute) SegmentQuery() string {
 	query := `
