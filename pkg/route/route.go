@@ -160,7 +160,7 @@ func (l *LRSRoute) GetAttributes() map[string]any {
 
 // DuckDB table view name
 func (l *LRSRoute) ViewName() string {
-	return "lrs"
+	return "lrs_recordbatch"
 }
 
 // If the data is materialized into a file
