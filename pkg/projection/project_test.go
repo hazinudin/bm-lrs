@@ -21,7 +21,7 @@ func TestTransform(t *testing.T) {
 			schema := arrow.NewSchema(
 				[]arrow.Field{
 					{Name: "LAT", Type: arrow.PrimitiveTypes.Float64},
-					{Name: "LONG", Type: arrow.PrimitiveTypes.Float64},
+					{Name: "LON", Type: arrow.PrimitiveTypes.Float64},
 					{Name: "MVAL", Type: arrow.PrimitiveTypes.Float64},
 				},
 				nil,
