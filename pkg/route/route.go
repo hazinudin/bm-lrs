@@ -12,6 +12,12 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
+type lrsFiles struct {
+	Point      string
+	Segment    string
+	LineString string
+}
+
 type LRSRoute struct {
 	route_id        string
 	records         []arrow.RecordBatch
@@ -20,6 +26,7 @@ type LRSRoute struct {
 	MValueColumn    string
 	VertexSeqColumn string
 	crs             string
+	source_files    *lrsFiles
 }
 
 func NewLRSRoute(route_id string, recs []arrow.RecordBatch, crs string) LRSRoute {
