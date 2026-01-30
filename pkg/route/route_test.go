@@ -27,6 +27,7 @@ func TestLRSRoute(t *testing.T) {
 
 	conn, err := c.Connect(context.Background())
 	db := sql.OpenDB(c)
+	defer db.Close()
 
 	if err != nil {
 		log.Fatal(err)
@@ -188,6 +189,33 @@ func TestLRSRoute(t *testing.T) {
 			for out_reader.Next() {
 				rec := out_reader.RecordBatch()
 				fmt.Printf("%v %v\n", rec.NumRows(), rec.NumCols())
+			}
+		},
+	)
+
+	t.Run(
+		"linestring table view test", func(t *testing.T) {
+			lrs := NewLRSRouteFromESRIGeoJSON(
+				"01001",
+				jsonByte,
+				0,
+				WKT,
+			)
+			defer lrs.Release()
+
+			rr, err := array.NewRecordReader(lrs.GetRecords()[0].Schema(), lrs.GetRecords())
+			_, err = db.ExecContext(context.Background(), "install spatial; load spatial;")
+			if err != nil {
+				t.Error(err)
+			}
+
+			release, err := ar.RegisterView(rr, lrs.ViewName())
+			defer release()
+
+			// Write to parquet file for evaluation
+			_, err = db.QueryContext(context.Background(), fmt.Sprintf("copy (%s) to 'testdata/lrs_01001_linestr.parquet' (FORMAT parquet);", lrs.LinestringQuery()))
+			if err != nil {
+				t.Error(err)
 			}
 		},
 	)
