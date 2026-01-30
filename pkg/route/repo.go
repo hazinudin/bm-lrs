@@ -17,17 +17,25 @@ import (
 type LRSRouteRepository struct {
 	connector *duckdb.Connector
 	pgConnStr string
+	db        *sql.DB
 }
 
-func NewLRSRouteRepository(connector *duckdb.Connector, pgConnStr string) *LRSRouteRepository {
+func NewLRSRouteRepository(connector *duckdb.Connector, pgConnStr string, db *sql.DB) *LRSRouteRepository {
 	return &LRSRouteRepository{
 		connector: connector,
 		pgConnStr: pgConnStr,
+		db:        db,
 	}
 }
 
+// SyncOptions contains options for syncing LRS data
+type SyncOptions struct {
+	Author    string
+	CommitMsg string
+}
+
 // Sync fetches data from ArcGIS, processes it into Parquet files, and updates the Postgres catalog.
-func (r *LRSRouteRepository) Sync(ctx context.Context, routeID string) error {
+func (r *LRSRouteRepository) Sync(ctx context.Context, routeID string, opts SyncOptions) error {
 	// 1. Load ArcGIS URL from env
 	arcgisURL := os.Getenv("ARCGIS_FEATURE_SERVICE_URL")
 	if arcgisURL == "" {
@@ -40,7 +48,13 @@ func (r *LRSRouteRepository) Sync(ctx context.Context, routeID string) error {
 		return fmt.Errorf("failed to fetch arcgis data: %w", err)
 	}
 
-	// 3. Create LRSRoute object
+	return r.syncFromGeoJSON(ctx, routeID, geoJSON, opts)
+}
+
+// syncFromGeoJSON processes GeoJSON data into Parquet files and updates the Postgres catalog.
+// This is the internal method that can be called directly for testing.
+func (r *LRSRouteRepository) syncFromGeoJSON(ctx context.Context, routeID string, geoJSON []byte, opts SyncOptions) error {
+	// Create LRSRoute object
 	lrsRoute := NewLRSRouteFromESRIGeoJSON(routeID, geoJSON, 0, "EPSG:4326")
 	defer lrsRoute.Release()
 
@@ -70,12 +84,8 @@ func (r *LRSRouteRepository) Sync(ctx context.Context, routeID string) error {
 	}
 	defer release()
 
-	// Open DB for SQL operations
-	db := sql.OpenDB(r.connector)
-	defer db.Close()
-
 	// Install spatial extension
-	if _, err := db.ExecContext(ctx, "INSTALL spatial; LOAD spatial;"); err != nil {
+	if _, err := r.db.ExecContext(ctx, "INSTALL spatial; LOAD spatial;"); err != nil {
 		return fmt.Errorf("failed to load spatial extension: %w", err)
 	}
 
@@ -93,32 +103,32 @@ func (r *LRSRouteRepository) Sync(ctx context.Context, routeID string) error {
 
 	// Export Segment Query to Parquet
 	segmentQuery := lrsRoute.SegmentQuery()
-	_, err = db.ExecContext(ctx, fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET)", segmentQuery, segmentFile))
+	_, err = r.db.ExecContext(ctx, fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET);", segmentQuery, segmentFile))
 	if err != nil {
 		return fmt.Errorf("failed to export segment parquet: %w", err)
 	}
 
 	// Export Linestring Query to Parquet
-	linestringSelect := fmt.Sprintf(`
-		SELECT ST_Makeline(
-			list(ST_Point(%s, %s) ORDER BY %s ASC)
-		) as linestr FROM %s
-	`, lrsRoute.LatitudeColumn, lrsRoute.LongitudeColumn, lrsRoute.VertexSeqColumn, lrsRoute.ViewName())
-
-	_, err = db.ExecContext(ctx, fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET)", linestringSelect, linestringFile))
+	linestringQuery := lrsRoute.LinestringQuery()
+	_, err = r.db.ExecContext(ctx, fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET);", linestringQuery, linestringFile))
 	if err != nil {
 		return fmt.Errorf("failed to export linestring parquet: %w", err)
 	}
 
 	// 5. Postgres Transaction
+	// Install and load postgres extension
+	if _, err := r.db.ExecContext(ctx, "INSTALL postgres; LOAD postgres;"); err != nil {
+		return fmt.Errorf("failed to load postgres extension: %w", err)
+	}
+
 	// Attach Postgres database
-	_, err = db.ExecContext(ctx, fmt.Sprintf("ATTACH IF NOT EXISTS '%s' AS postgres_db (TYPE POSTGRES)", r.pgConnStr))
+	_, err = r.db.ExecContext(ctx, fmt.Sprintf("ATTACH '%s' AS postgres_db (TYPE POSTGRES)", r.pgConnStr))
 	if err != nil {
 		return fmt.Errorf("failed to attach postgres: %w", err)
 	}
 
 	// Begin transaction
-	tx, err := db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
@@ -126,28 +136,35 @@ func (r *LRSRouteRepository) Sync(ctx context.Context, routeID string) error {
 
 	// Create catalog table if not exists
 	createTable := `
-	CREATE TABLE IF NOT EXISTS postgres_db.lrs_route_files (
-		route_id TEXT,
-		file_type TEXT,
-		file_path TEXT,
-		created_at TIMESTAMP
+	CREATE TABLE IF NOT EXISTS postgres_db.lrs_catalogs (
+		VERSION INTEGER,
+		START_DATE DATE,
+		END_DATE DATE,
+		LRS_SEGMENT_FILE TEXT,
+		LRS_LINESTR_FILE TEXT,
+		AUTHOR TEXT,
+		COMMIT_MSG TEXT
 	)`
 	_, err = tx.ExecContext(ctx, createTable)
 	if err != nil {
 		return fmt.Errorf("failed to create catalog table: %w", err)
 	}
 
-	// Insert file records
-	insertQuery := `INSERT INTO postgres_db.lrs_route_files (route_id, file_type, file_path, created_at) VALUES (?, ?, ?, ?)`
-
-	_, err = tx.ExecContext(ctx, insertQuery, routeID, "segment", segmentFile, time.Now())
+	// Get next version number
+	var nextVersion int
+	err = tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(VERSION), 0) + 1 FROM postgres_db.lrs_catalogs").Scan(&nextVersion)
 	if err != nil {
-		return fmt.Errorf("failed to insert segment file record: %w", err)
+		return fmt.Errorf("failed to get next version: %w", err)
 	}
 
-	_, err = tx.ExecContext(ctx, insertQuery, routeID, "linestring", linestringFile, time.Now())
+	// Insert catalog record
+	insertQuery := `INSERT INTO postgres_db.lrs_catalogs 
+		(VERSION, START_DATE, END_DATE, LRS_SEGMENT_FILE, LRS_LINESTR_FILE, AUTHOR, COMMIT_MSG) 
+		VALUES (?, CURRENT_DATE, NULL, ?, ?, ?, ?)`
+
+	_, err = tx.ExecContext(ctx, insertQuery, nextVersion, segmentFile, linestringFile, opts.Author, opts.CommitMsg)
 	if err != nil {
-		return fmt.Errorf("failed to insert linestring file record: %w", err)
+		return fmt.Errorf("failed to insert catalog record: %w", err)
 	}
 
 	// Commit transaction
@@ -160,36 +177,33 @@ func (r *LRSRouteRepository) Sync(ctx context.Context, routeID string) error {
 
 // GetLatest retrieves the latest LRSRoute data from the catalog.
 func (r *LRSRouteRepository) GetLatest(ctx context.Context, routeID string) (*LRSRoute, error) {
-	db := sql.OpenDB(r.connector)
-	defer db.Close()
+	// Install postgres extension
+	if _, err := r.db.ExecContext(ctx, "INSTALL postgres; LOAD postgres;"); err != nil {
+		return nil, fmt.Errorf("failed to load postgres extension: %w", err)
+	}
 
 	// Attach Postgres
-	_, err := db.ExecContext(ctx, fmt.Sprintf("ATTACH IF NOT EXISTS '%s' AS postgres_db (TYPE POSTGRES)", r.pgConnStr))
+	_, err := r.db.ExecContext(ctx, fmt.Sprintf("ATTACH IF NOT EXISTS '%s' AS postgres_db (TYPE POSTGRES)", r.pgConnStr))
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach postgres: %w", err)
 	}
 
-	// Query for latest segment file
+	// Query for latest active catalog entry (END_DATE is NULL means active)
 	query := `
-		SELECT file_path 
-		FROM postgres_db.lrs_route_files 
-		WHERE route_id = ? AND file_type = ? 
-		ORDER BY created_at DESC 
+		SELECT LRS_SEGMENT_FILE, LRS_LINESTR_FILE, VERSION
+		FROM postgres_db.lrs_catalogs 
+		WHERE END_DATE IS NULL
+		ORDER BY VERSION DESC 
 		LIMIT 1
 	`
-	var segmentPath string
-	err = db.QueryRowContext(ctx, query, routeID, "segment").Scan(&segmentPath)
+	var segmentPath, linestringPath string
+	var version int
+	err = r.db.QueryRowContext(ctx, query).Scan(&segmentPath, &linestringPath, &version)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("no segment file found for route %s", routeID)
+			return nil, fmt.Errorf("no active catalog entry found")
 		}
-		return nil, fmt.Errorf("failed to query latest segment file: %w", err)
-	}
-
-	var linestringPath string
-	err = db.QueryRowContext(ctx, query, routeID, "linestring").Scan(&linestringPath)
-	if err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("failed to query latest linestring file: %w", err)
+		return nil, fmt.Errorf("failed to query latest catalog: %w", err)
 	}
 
 	return &LRSRoute{
