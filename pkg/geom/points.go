@@ -16,7 +16,7 @@ func NewPoints(recs []arrow.RecordBatch, crs string) Points {
 	return Points{
 		records:         recs,
 		LatitudeColumn:  "LAT",
-		LongitudeColumn: "LONG",
+		LongitudeColumn: "LON",
 		MValueColumn:    "MVAL",
 		crs:             crs,
 	}
