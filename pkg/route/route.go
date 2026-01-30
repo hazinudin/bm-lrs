@@ -216,12 +216,10 @@ func (l *LRSRoute) SegmentQuery() string {
 // LRS Route line string query.
 func (l *LRSRoute) LinestringQuery() string {
 	query := `
-	install spatial;
-	load spatial;
-	
 	select ST_Makeline(
-	list(ST_Point({{.LatCol}}, {{.LonCol}}) order by {{.VertexSeqCol}} asc)
-	) as linestr from {{.ViewName}}
+	list(ST_Point({{.LatCol}}, {{.LongCol}}) order by {{.VertexSeqCol}} asc)
+	) as linestr 
+	 from {{.ViewName}}
 	`
 
 	data := map[string]string{
