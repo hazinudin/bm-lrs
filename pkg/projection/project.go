@@ -82,7 +82,7 @@ func Transform(obj geom.Geometry, crs string, inverted bool) (geom.Geometry, err
 
 	data := map[string]string{
 		"LatCol":    "LAT",
-		"LongCol":   "LONG",
+		"LongCol":   "LON",
 		"OriginCRS": obj.GetCRS(),
 		"TargetCRS": crs,
 	}
