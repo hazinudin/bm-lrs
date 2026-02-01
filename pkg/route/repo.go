@@ -126,6 +126,7 @@ func (r *LRSRouteRepository) syncFromGeoJSON(ctx context.Context, routeID string
 		VERSION INTEGER,
 		START_DATE DATE,
 		END_DATE DATE,
+		LRS_POINT_FILE TEXT,
 		LRS_SEGMENT_FILE TEXT,
 		LRS_LINESTR_FILE TEXT,
 		AUTHOR TEXT,
@@ -145,10 +146,10 @@ func (r *LRSRouteRepository) syncFromGeoJSON(ctx context.Context, routeID string
 
 	// Insert catalog record
 	insertQuery := `INSERT INTO postgres_db.lrs_catalogs 
-		(VERSION, START_DATE, END_DATE, LRS_SEGMENT_FILE, LRS_LINESTR_FILE, AUTHOR, COMMIT_MSG) 
-		VALUES (?, CURRENT_DATE, NULL, ?, ?, ?, ?)`
+		(VERSION, START_DATE, END_DATE, LRS_POINT_FILE, LRS_SEGMENT_FILE, LRS_LINESTR_FILE, AUTHOR, COMMIT_MSG) 
+		VALUES (?, CURRENT_DATE, NULL, ?, ?, ?, ?, ?)`
 
-	_, err = tx.ExecContext(ctx, insertQuery, nextVersion, segmentFile, linestringFile, opts.Author, opts.CommitMsg)
+	_, err = tx.ExecContext(ctx, insertQuery, nextVersion, lrsRoute.GetPointFile(), segmentFile, linestringFile, opts.Author, opts.CommitMsg)
 	if err != nil {
 		return fmt.Errorf("failed to insert catalog record: %w", err)
 	}
