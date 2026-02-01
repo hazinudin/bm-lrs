@@ -219,4 +219,50 @@ func TestLRSRoute(t *testing.T) {
 			}
 		},
 	)
+
+	t.Run(
+		"sink function test", func(t *testing.T) {
+			lrs := NewLRSRouteFromESRIGeoJSON(
+				"01001",
+				jsonByte,
+				0,
+				WKT,
+			)
+			defer lrs.Release()
+
+			lrs.Sink()
+
+			// 3. Verify
+			if lrs.source_files == nil || lrs.source_files.Point == nil {
+				t.Fatal("Sink() did not populate source_files.Point")
+			}
+
+			filePath := *lrs.source_files.Point
+			t.Logf("Generated file path: %s", filePath)
+
+			// Check if file exists
+			if _, err := os.Stat(filePath); os.IsNotExist(err) {
+				t.Errorf("File %s does not exist", filePath)
+			}
+
+			// Check if file is in a temp dir
+			if lrs.temp_dir == "" {
+				t.Error("temp_dir is empty")
+			}
+
+			// 4. Call Release() and verify cleanup
+			lrs.Release()
+
+			// Check if file is gone
+			if _, err := os.Stat(filePath); !os.IsNotExist(err) {
+				t.Errorf("File %s still exists after Release()", filePath)
+			}
+
+			// Check if temp dir is gone
+			if _, err := os.Stat(lrs.temp_dir); !os.IsNotExist(err) {
+				t.Errorf("Temp dir %s still exists after Release()", lrs.temp_dir)
+			}
+
+		},
+	)
 }
