@@ -181,7 +181,11 @@ func (l *LRSRoute) GetAttributes() map[string]any {
 
 // DuckDB table view name
 func (l *LRSRoute) ViewName() string {
+	if l.IsMaterialized() {
+		return fmt.Sprintf(`select *, '%s' as ROUTEID from "%s"`, l.GetRouteID(), *l.source_files.Point)
+	} else {
 	return "lrs_recordbatch"
+}
 }
 
 // If the data is materialized into a file
