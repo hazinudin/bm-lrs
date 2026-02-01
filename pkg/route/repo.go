@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/duckdb/duckdb-go/v2"
 )
 
@@ -65,24 +64,11 @@ func (r *LRSRouteRepository) syncFromGeoJSON(ctx context.Context, routeID string
 	}
 	defer conn.Close()
 
-	// Get Arrow interface
-	ar, err := duckdb.NewArrowFromConn(conn)
+	// Sink the record batch first
+	err = lrsRoute.Sink()
 	if err != nil {
-		return fmt.Errorf("failed to create arrow interface: %w", err)
+		return fmt.Errorf("Failed to sink the LRS object: %v", err)
 	}
-
-	// Register Arrow View
-	records := lrsRoute.GetRecords()
-	rr, err := array.NewRecordReader(records[0].Schema(), records)
-	if err != nil {
-		return fmt.Errorf("failed to create record reader: %w", err)
-	}
-
-	release, err := ar.RegisterView(rr, lrsRoute.ViewName())
-	if err != nil {
-		return fmt.Errorf("failed to register arrow view: %w", err)
-	}
-	defer release()
 
 	// Install spatial extension
 	if _, err := r.db.ExecContext(ctx, "INSTALL spatial; LOAD spatial;"); err != nil {
