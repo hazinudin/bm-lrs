@@ -190,7 +190,7 @@ func (l *LRSRoute) ViewName() string {
 
 // If the data is materialized into a file
 func (l *LRSRoute) IsMaterialized() bool {
-	if l.source_files != nil {
+	if l.GetPointFile() != nil {
 		return true
 	} else {
 		return false
