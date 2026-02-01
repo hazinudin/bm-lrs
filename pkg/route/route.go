@@ -184,8 +184,8 @@ func (l *LRSRoute) ViewName() string {
 	if l.IsMaterialized() {
 		return fmt.Sprintf(`select *, '%s' as ROUTEID from "%s"`, l.GetRouteID(), *l.source_files.Point)
 	} else {
-	return "lrs_recordbatch"
-}
+		return "lrs_recordbatch"
+	}
 }
 
 // If the data is materialized into a file
@@ -260,7 +260,7 @@ func (l *LRSRoute) SegmentQuery() string {
 		LEAD({{.LongCol}}, 1, null) over (order by {{.VertexSeqCol}}) as {{.LongCol}}1,
 		LEAD({{.LatCol}}, 1, null) over (order by {{.VertexSeqCol}}) as {{.LatCol}}1,
 		LEAD({{.MvalCol}}, 1, null) over (order by {{.VertexSeqCol}}) as {{.MvalCol}}1
-		from {{.ViewName}}
+		from ({{.ViewName}})
 	)
 	where {{.LongCol}}1 is not null
 	`
@@ -293,7 +293,7 @@ func (l *LRSRoute) LinestringQuery() string {
 	select ST_Makeline(
 	list(ST_Point({{.LatCol}}, {{.LongCol}}) order by {{.VertexSeqCol}} asc)
 	) as linestr 
-	 from {{.ViewName}}
+	 from ({{.ViewName}})
 	`
 
 	data := map[string]string{
