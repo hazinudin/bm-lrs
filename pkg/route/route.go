@@ -139,6 +139,11 @@ func (l *LRSRoute) Release() {
 	for i := range len(l.records) {
 		l.records[i].Release()
 	}
+
+	// Clean up temp dir if exists
+	if l.temp_dir != "" {
+		os.RemoveAll(l.temp_dir)
+	}
 }
 
 // Get CRS
