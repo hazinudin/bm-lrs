@@ -146,6 +146,15 @@ func (l *LRSRoute) GetCRS() string {
 	return l.crs
 }
 
+// Get point source file
+func (l *LRSRoute) GetPointFile() *string {
+	if l.source_files == nil {
+		return nil
+	} else {
+		return l.source_files.Point
+	}
+}
+
 // Get Route ID
 func (l *LRSRoute) GetRouteID() string {
 	return l.route_id
