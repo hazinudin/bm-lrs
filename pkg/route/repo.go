@@ -177,15 +177,15 @@ func (r *LRSRouteRepository) GetLatest(ctx context.Context, routeID string) (*LR
 
 	// Query for latest active catalog entry (END_DATE is NULL means active)
 	query := `
-		SELECT LRS_SEGMENT_FILE, LRS_LINESTR_FILE, VERSION
+		SELECT LRS_POINT_FILE, LRS_SEGMENT_FILE, LRS_LINESTR_FILE, VERSION
 		FROM postgres_db.lrs_catalogs 
 		WHERE END_DATE IS NULL
 		ORDER BY VERSION DESC 
 		LIMIT 1
 	`
-	var segmentPath, linestringPath string
+	var segmentPath, linestringPath, pointPath string
 	var version int
-	err = r.db.QueryRowContext(ctx, query).Scan(&segmentPath, &linestringPath, &version)
+	err = r.db.QueryRowContext(ctx, query).Scan(&pointPath, &segmentPath, &linestringPath, &version)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("no active catalog entry found")
@@ -200,9 +200,10 @@ func (r *LRSRouteRepository) GetLatest(ctx context.Context, routeID string) (*LR
 		MValueColumn:    "MVAL",
 		VertexSeqColumn: "VERTEX_SEQ",
 		crs:             "EPSG:4326",
-		source_files: &lrsFiles{
-			Segment:    segmentPath,
-			LineString: linestringPath,
+		source_files: &sourceFiles{
+			Point:      &pointPath,
+			Segment:    &segmentPath,
+			LineString: &linestringPath,
 		},
 	}, nil
 }
