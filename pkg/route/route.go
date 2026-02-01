@@ -4,12 +4,18 @@ import (
 	"bm-lrs/pkg/geom"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"text/template"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/compress"
+	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 )
 
 type sourceFiles struct {
@@ -171,6 +177,55 @@ func (l *LRSRoute) IsMaterialized() bool {
 	} else {
 		return false
 	}
+}
+
+// Sink the source record batch into parquet file
+func (l *LRSRoute) Sink() error {
+	// Create temporary directory
+	tempDir, err := os.MkdirTemp("", "lrs_route_*")
+	if err != nil {
+		return fmt.Errorf("Failed to create temporary directory: %v", err)
+	}
+	l.temp_dir = tempDir
+
+	filePath := filepath.Join(tempDir, fmt.Sprintf("temp_%s.parquet", l.route_id))
+
+	f, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("Failed to create file: %v", err)
+	}
+	defer f.Close()
+
+	if len(l.records) == 0 {
+		return fmt.Errorf("records are empty")
+	}
+
+	schema := l.records[0].Schema()
+	writer, err := pqarrow.NewFileWriter(
+		schema,
+		f,
+		parquet.NewWriterProperties(
+			parquet.WithCompression(compress.Codecs.Snappy)),
+		pqarrow.DefaultWriterProps(),
+	)
+
+	if err != nil {
+		return fmt.Errorf("Failed to create parquet writer: %v", err)
+	}
+	defer writer.Close()
+
+	for _, rec := range l.records {
+		if err := writer.WriteBuffered(rec); err != nil {
+			return fmt.Errorf("Failed to write record batch: %v", err)
+		}
+	}
+
+	if l.source_files == nil {
+		l.source_files = &sourceFiles{}
+	}
+	l.source_files.Point = &filePath
+
+	return nil
 }
 
 // LRS segment along with M-Value gradient and coefficient query
