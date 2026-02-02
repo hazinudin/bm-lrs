@@ -84,21 +84,94 @@ func (r *LRSRouteRepository) syncFromGeoJSON(ctx context.Context, routeID string
 		return fmt.Errorf("failed to create data dir: %w", err)
 	}
 
-	segmentFile := filepath.Join(dataDir, fmt.Sprintf("lrs_segment_%s_%d.parquet", routeID, time.Now().Unix()))
-	linestringFile := filepath.Join(dataDir, fmt.Sprintf("lrs_linestring_%s_%d.parquet", routeID, time.Now().Unix()))
+	timeStamp := time.Now().Unix()
+	mergedPointFile := filepath.Join(dataDir, fmt.Sprintf("lrs_point_merged_%d.parquet", timeStamp))
+	mergedSegmentFile := filepath.Join(dataDir, fmt.Sprintf("lrs_segment_merged_%d.parquet", timeStamp))
+	mergedLinestringFile := filepath.Join(dataDir, fmt.Sprintf("lrs_linestring_merged_%d.parquet", timeStamp))
 
-	// Export Segment Query to Parquet
-	segmentQuery := lrsRoute.SegmentQuery()
-	_, err = r.db.ExecContext(ctx, fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET);", segmentQuery, segmentFile))
-	if err != nil {
-		return fmt.Errorf("failed to export segment parquet: %w", err)
+	// Get latest merged files to merge with
+	latestLRS, err := r.GetLatest(ctx, "")
+	// If err is nil, we have a previous version. If not nil (likely no rows), we start fresh.
+	// Note: GetLatest requires a routeID, but here we might want just any latest catalog entry.
+	// Let's modify GetLatest logic slightly or query directly.
+	// Actually GetLatest takes a routeID but currently ignores it for file retrieval (logic finds *latest catalog*).
+	// So we can re-use GetLatest with a dummy ID, or better, query explicitly here safely.
+
+	var prevPointFile, prevSegmentFile, prevLinestrFile string
+	// Helper to check if previous files exist
+	hasPrev := false
+	if err == nil && latestLRS != nil {
+		// Valid previous catalog
+		if latestLRS.GetPointFile() != nil {
+			prevPointFile = *latestLRS.GetPointFile()
+			hasPrev = true
+		}
+		if latestLRS.source_files != nil {
+			if latestLRS.source_files.Segment != nil {
+				prevSegmentFile = *latestLRS.source_files.Segment
+			}
+			if latestLRS.source_files.LineString != nil {
+				prevLinestrFile = *latestLRS.source_files.LineString
+			}
+		}
 	}
 
-	// Export Linestring Query to Parquet
-	linestringQuery := lrsRoute.LinestringQuery()
-	_, err = r.db.ExecContext(ctx, fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET);", linestringQuery, linestringFile))
+	// 1. Merge Points
+	// Logic: Union (Previous - CurrentRoute) + CurrentRoute
+	var queryPoint string
+	if hasPrev {
+		queryPoint = fmt.Sprintf(`
+			SELECT * FROM "%s" WHERE ROUTEID != '%s'
+			UNION ALL
+			SELECT *, '%s' as ROUTEID FROM "%s"
+		`, prevPointFile, routeID, routeID, *lrsRoute.source_files.Point)
+	} else {
+		// First time, just current route
+		queryPoint = fmt.Sprintf(`SELECT *, '%s' as ROUTEID FROM "%s"`, routeID, *lrsRoute.source_files.Point)
+	}
+	_, err = r.db.ExecContext(ctx, fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET);", queryPoint, mergedPointFile))
 	if err != nil {
-		return fmt.Errorf("failed to export linestring parquet: %w", err)
+		return fmt.Errorf("failed to export merged point parquet: %w", err)
+	}
+
+	// 2. Merge Segments
+	// Current route segment query
+	currentSegmentQuery := fmt.Sprintf(`SELECT *, '%s' as ROUTEID FROM (%s)`, routeID, lrsRoute.SegmentQuery())
+
+	var querySegment string
+	if hasPrev && prevSegmentFile != "" {
+		querySegment = fmt.Sprintf(`
+			SELECT * FROM "%s" WHERE ROUTEID != '%s'
+			UNION ALL
+			%s
+		`, prevSegmentFile, routeID, currentSegmentQuery)
+	} else {
+		querySegment = currentSegmentQuery
+	}
+	_, err = r.db.ExecContext(ctx, fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET);", querySegment, mergedSegmentFile))
+	if err != nil {
+		return fmt.Errorf("failed to export merged segment parquet: %w", err)
+	}
+
+	// 3. Merge Linestrings
+	// Current route linestring query
+	// Note: LinestringQuery returns just 'linestr'. We need to add ROUTEID.
+	currentLinestrQuery := fmt.Sprintf(`SELECT *, '%s' as ROUTEID FROM (%s)`, routeID, lrsRoute.LinestringQuery())
+
+	var queryLinestr string
+	if hasPrev && prevLinestrFile != "" {
+		queryLinestr = fmt.Sprintf(`
+			SELECT * FROM "%s" WHERE ROUTEID != '%s'
+			UNION ALL
+			%s
+		`, prevLinestrFile, routeID, currentLinestrQuery)
+	} else {
+		queryLinestr = currentLinestrQuery
+	}
+
+	_, err = r.db.ExecContext(ctx, fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET);", queryLinestr, mergedLinestringFile))
+	if err != nil {
+		return fmt.Errorf("failed to export merged linestring parquet: %w", err)
 	}
 
 	// 5. Postgres Transaction
@@ -108,7 +181,7 @@ func (r *LRSRouteRepository) syncFromGeoJSON(ctx context.Context, routeID string
 	}
 
 	// Attach Postgres database
-	_, err = r.db.ExecContext(ctx, fmt.Sprintf("ATTACH '%s' AS postgres_db (TYPE POSTGRES)", r.pgConnStr))
+	_, err = r.db.ExecContext(ctx, fmt.Sprintf("ATTACH IF NOT EXISTS '%s' AS postgres_db (TYPE POSTGRES)", r.pgConnStr))
 	if err != nil {
 		return fmt.Errorf("failed to attach postgres: %w", err)
 	}
@@ -137,6 +210,12 @@ func (r *LRSRouteRepository) syncFromGeoJSON(ctx context.Context, routeID string
 		return fmt.Errorf("failed to create catalog table: %w", err)
 	}
 
+	// Update END_DATE for previous latest version if exists
+	_, err = tx.ExecContext(ctx, "UPDATE postgres_db.lrs_catalogs SET END_DATE = CURRENT_DATE WHERE END_DATE IS NULL")
+	if err != nil {
+		return fmt.Errorf("failed to update previous catalog entries: %w", err)
+	}
+
 	// Get next version number
 	var nextVersion int
 	err = tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(VERSION), 0) + 1 FROM postgres_db.lrs_catalogs").Scan(&nextVersion)
@@ -149,7 +228,7 @@ func (r *LRSRouteRepository) syncFromGeoJSON(ctx context.Context, routeID string
 		(VERSION, START_DATE, END_DATE, LRS_POINT_FILE, LRS_SEGMENT_FILE, LRS_LINESTR_FILE, AUTHOR, COMMIT_MSG) 
 		VALUES (?, CURRENT_DATE, NULL, ?, ?, ?, ?, ?)`
 
-	_, err = tx.ExecContext(ctx, insertQuery, nextVersion, lrsRoute.GetPointFile(), segmentFile, linestringFile, opts.Author, opts.CommitMsg)
+	_, err = tx.ExecContext(ctx, insertQuery, nextVersion, mergedPointFile, mergedSegmentFile, mergedLinestringFile, opts.Author, opts.CommitMsg)
 	if err != nil {
 		return fmt.Errorf("failed to insert catalog record: %w", err)
 	}
@@ -193,7 +272,7 @@ func (r *LRSRouteRepository) GetLatest(ctx context.Context, routeID string) (*LR
 		return nil, fmt.Errorf("failed to query latest catalog: %w", err)
 	}
 
-	return &LRSRoute{
+	out := &LRSRoute{
 		route_id:        routeID,
 		LatitudeColumn:  "LAT",
 		LongitudeColumn: "LON",
@@ -205,7 +284,9 @@ func (r *LRSRouteRepository) GetLatest(ctx context.Context, routeID string) (*LR
 			Segment:    &segmentPath,
 			LineString: &linestringPath,
 		},
-	}, nil
+	}
+	out.setPushDown(true)
+	return out, nil
 }
 
 // fetchArcGISData fetches GeoJSON data from ArcGIS Feature Service
