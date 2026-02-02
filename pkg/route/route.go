@@ -34,6 +34,7 @@ type LRSRoute struct {
 	crs             string
 	source_files    *sourceFiles
 	temp_dir        string
+	push_down       bool
 }
 
 func NewLRSRoute(route_id string, recs []arrow.RecordBatch, crs string) LRSRoute {
@@ -46,6 +47,10 @@ func NewLRSRoute(route_id string, recs []arrow.RecordBatch, crs string) LRSRoute
 		VertexSeqColumn: "VERTEX_SEQ",
 		crs:             crs,
 	}
+}
+
+func (l *LRSRoute) setPushDown(enable bool) {
+	l.push_down = enable
 }
 
 // Create LRSRoute from ESRI GeoJSON
@@ -182,7 +187,10 @@ func (l *LRSRoute) GetAttributes() map[string]any {
 // DuckDB table view name
 func (l *LRSRoute) ViewName() string {
 	if l.IsMaterialized() {
-		return fmt.Sprintf(`select *, '%s' as ROUTEID from "%s"`, l.GetRouteID(), *l.source_files.Point)
+		if l.push_down {
+			return fmt.Sprintf(`(select * from "%s" where ROUTEID = '%s')`, *l.source_files.Point, l.GetRouteID())
+		}
+		return fmt.Sprintf(`(select *, '%s' as ROUTEID from "%s")`, l.GetRouteID(), *l.source_files.Point)
 	} else {
 		return "lrs_recordbatch"
 	}
@@ -260,7 +268,7 @@ func (l *LRSRoute) SegmentQuery() string {
 		LEAD({{.LongCol}}, 1, null) over (order by {{.VertexSeqCol}}) as {{.LongCol}}1,
 		LEAD({{.LatCol}}, 1, null) over (order by {{.VertexSeqCol}}) as {{.LatCol}}1,
 		LEAD({{.MvalCol}}, 1, null) over (order by {{.VertexSeqCol}}) as {{.MvalCol}}1
-		from ({{.ViewName}})
+		from {{.ViewName}}
 	)
 	where {{.LongCol}}1 is not null
 	`
@@ -293,7 +301,7 @@ func (l *LRSRoute) LinestringQuery() string {
 	select ST_Makeline(
 	list(ST_Point({{.LatCol}}, {{.LongCol}}) order by {{.VertexSeqCol}} asc)
 	) as linestr 
-	 from ({{.ViewName}})
+	 from {{.ViewName}}
 	`
 
 	data := map[string]string{
