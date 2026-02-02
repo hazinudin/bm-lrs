@@ -165,6 +165,24 @@ func (l *LRSRoute) GetPointFile() *string {
 	}
 }
 
+// Get segment source file
+func (l *LRSRoute) GetSegmentFile() *string {
+	if l.source_files == nil {
+		return nil
+	} else {
+		return l.source_files.Segment
+	}
+}
+
+// Get linestring source file
+func (l *LRSRoute) GetLineFile() *string {
+	if l.source_files == nil {
+		return nil
+	} else {
+		return l.source_files.LineString
+	}
+}
+
 // Get Route ID
 func (l *LRSRoute) GetRouteID() string {
 	return l.route_id
@@ -256,73 +274,88 @@ func (l *LRSRoute) Sink() error {
 
 // LRS segment along with M-Value gradient and coefficient query
 func (l *LRSRoute) SegmentQuery() string {
-	query := `
-	select *,
-	({{.LatCol}}1-{{.LatCol}})/({{.LongCol}}-{{.LongCol}}1) as mvgradient,
-	{{.LatCol}}-(mvgradient*{{.LongCol}})as c
-	from
-	(
-		select 
-		* exclude({{.LatCol}}, {{.LongCol}}, {{.MvalCol}}, {{.VertexSeqCol}}),
-		{{.LongCol}}, {{.LatCol}}, {{.MvalCol}}, {{.VertexSeqCol}},
-		LEAD({{.LongCol}}, 1, null) over (order by {{.VertexSeqCol}}) as {{.LongCol}}1,
-		LEAD({{.LatCol}}, 1, null) over (order by {{.VertexSeqCol}}) as {{.LatCol}}1,
-		LEAD({{.MvalCol}}, 1, null) over (order by {{.VertexSeqCol}}) as {{.MvalCol}}1
-		from {{.ViewName}}
-	)
-	where {{.LongCol}}1 is not null
-	`
+	if l.GetSegmentFile() != nil {
+		if l.push_down {
+			return fmt.Sprintf(`select * from "%s" where ROUTEID = '%s';`, *l.GetSegmentFile(), l.GetRouteID())
+		} else {
+			return fmt.Sprintf(`select * from "%s";`, *l.GetSegmentFile())
+		}
+	} else {
+		query := `
+		select *,
+		({{.LatCol}}1-{{.LatCol}})/({{.LongCol}}-{{.LongCol}}1) as mvgradient,
+		{{.LatCol}}-(mvgradient*{{.LongCol}})as c
+		from
+		(
+			select 
+			* exclude({{.LatCol}}, {{.LongCol}}, {{.MvalCol}}, {{.VertexSeqCol}}),
+			{{.LongCol}}, {{.LatCol}}, {{.MvalCol}}, {{.VertexSeqCol}},
+			LEAD({{.LongCol}}, 1, null) over (order by {{.VertexSeqCol}}) as {{.LongCol}}1,
+			LEAD({{.LatCol}}, 1, null) over (order by {{.VertexSeqCol}}) as {{.LatCol}}1,
+			LEAD({{.MvalCol}}, 1, null) over (order by {{.VertexSeqCol}}) as {{.MvalCol}}1
+			from {{.ViewName}}
+		)
+		where {{.LongCol}}1 is not null
+		`
 
-	data := map[string]string{
-		"LongCol":      l.LongitudeColumn,
-		"LatCol":       l.LatitudeColumn,
-		"MvalCol":      l.MValueColumn,
-		"ViewName":     l.ViewName(),
-		"VertexSeqCol": l.VertexSeqColumn,
+		data := map[string]string{
+			"LongCol":      l.LongitudeColumn,
+			"LatCol":       l.LatitudeColumn,
+			"MvalCol":      l.MValueColumn,
+			"ViewName":     l.ViewName(),
+			"VertexSeqCol": l.VertexSeqColumn,
+		}
+
+		templ, err := template.New("queryTemplate").Parse(query)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		var buf bytes.Buffer
+		err = templ.Execute(&buf, data)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		return buf.String()
 	}
-
-	templ, err := template.New("queryTemplate").Parse(query)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	var buf bytes.Buffer
-	err = templ.Execute(&buf, data)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return buf.String()
 }
 
 // LRS Route line string query.
 func (l *LRSRoute) LinestringQuery() string {
-	query := `
-	select ST_Makeline(
-	list(ST_Point({{.LatCol}}, {{.LongCol}}) order by {{.VertexSeqCol}} asc)
-	) as linestr 
-	 from {{.ViewName}}
-	`
+	if l.GetSegmentFile() != nil {
+		if l.push_down {
+			return fmt.Sprintf(`select * from "%s" where ROUTEID = '%s';`, *l.GetLineFile(), l.GetRouteID())
+		} else {
+			return fmt.Sprintf(`select * from "%s";`, *l.GetLineFile())
+		}
+	} else {
+		query := `
+		select ST_Makeline(
+		list(ST_Point({{.LatCol}}, {{.LongCol}}) order by {{.VertexSeqCol}} asc)
+		) as linestr 
+		from {{.ViewName}}
+		`
 
-	data := map[string]string{
-		"LongCol":      l.LongitudeColumn,
-		"LatCol":       l.LatitudeColumn,
-		"MvalCol":      l.MValueColumn,
-		"ViewName":     l.ViewName(),
-		"VertexSeqCol": l.VertexSeqColumn,
+		data := map[string]string{
+			"LongCol":      l.LongitudeColumn,
+			"LatCol":       l.LatitudeColumn,
+			"MvalCol":      l.MValueColumn,
+			"ViewName":     l.ViewName(),
+			"VertexSeqCol": l.VertexSeqColumn,
+		}
+
+		templ, err := template.New("queryTemplate").Parse(query)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		var buf bytes.Buffer
+		err = templ.Execute(&buf, data)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		return buf.String()
 	}
-
-	templ, err := template.New("queryTemplate").Parse(query)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	var buf bytes.Buffer
-	err = templ.Execute(&buf, data)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return buf.String()
-
 }
