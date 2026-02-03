@@ -37,8 +37,17 @@ type LRSRoute struct {
 	push_down       bool
 }
 
+type LRSRouteInterface interface {
+	GetRouteID() string
+	ViewName() string
+	IsMaterialized() bool
+	Sink() error
+	SegmentQuery() string
+	LinestringQuery() string
+}
+
 func NewLRSRoute(route_id string, recs []arrow.RecordBatch, crs string) LRSRoute {
-	return LRSRoute{
+	out := LRSRoute{
 		route_id:        route_id,
 		records:         recs,
 		LatitudeColumn:  "LAT",
@@ -47,6 +56,8 @@ func NewLRSRoute(route_id string, recs []arrow.RecordBatch, crs string) LRSRoute
 		VertexSeqColumn: "VERTEX_SEQ",
 		crs:             crs,
 	}
+
+	return out
 }
 
 func (l *LRSRoute) setPushDown(enable bool) {
