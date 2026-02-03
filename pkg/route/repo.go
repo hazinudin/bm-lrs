@@ -127,7 +127,7 @@ func (r *LRSRouteRepository) syncFromGeoJSON(ctx context.Context, routeID string
 		`, prevPointFile, routeID, routeID, *lrsRoute.source_files.Point)
 	} else {
 		// First time, just current route
-		queryPoint = fmt.Sprintf(`SELECT *, '%s' as ROUTEID FROM "%s"`, routeID, *lrsRoute.source_files.Point)
+		queryPoint = lrsRoute.ViewName()
 	}
 	_, err = r.db.ExecContext(ctx, fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET);", queryPoint, mergedPointFile))
 	if err != nil {
