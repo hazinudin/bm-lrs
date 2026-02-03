@@ -123,8 +123,8 @@ func (r *LRSRouteRepository) syncFromGeoJSON(ctx context.Context, routeID string
 		queryPoint = fmt.Sprintf(`
 			SELECT * FROM "%s" WHERE ROUTEID != '%s'
 			UNION ALL
-			SELECT *, '%s' as ROUTEID FROM "%s"
-		`, prevPointFile, routeID, routeID, *lrsRoute.source_files.Point)
+			SELECT *, FROM %s
+		`, prevPointFile, routeID, lrsRoute.ViewName())
 	} else {
 		// First time, just current route
 		queryPoint = lrsRoute.ViewName()
@@ -136,7 +136,7 @@ func (r *LRSRouteRepository) syncFromGeoJSON(ctx context.Context, routeID string
 
 	// 2. Merge Segments
 	// Current route segment query
-	currentSegmentQuery := fmt.Sprintf(`SELECT *, '%s' as ROUTEID FROM (%s)`, routeID, lrsRoute.SegmentQuery())
+	currentSegmentQuery := fmt.Sprintf(`SELECT *, FROM (%s)`, lrsRoute.SegmentQuery())
 
 	var querySegment string
 	if hasPrev && prevSegmentFile != "" {
@@ -156,7 +156,7 @@ func (r *LRSRouteRepository) syncFromGeoJSON(ctx context.Context, routeID string
 	// 3. Merge Linestrings
 	// Current route linestring query
 	// Note: LinestringQuery returns just 'linestr'. We need to add ROUTEID.
-	currentLinestrQuery := fmt.Sprintf(`SELECT *, '%s' as ROUTEID FROM (%s)`, routeID, lrsRoute.LinestringQuery())
+	currentLinestrQuery := fmt.Sprintf(`SELECT *, FROM (%s)`, lrsRoute.LinestringQuery())
 
 	var queryLinestr string
 	if hasPrev && prevLinestrFile != "" {
