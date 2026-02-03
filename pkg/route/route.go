@@ -38,12 +38,10 @@ type LRSRoute struct {
 }
 
 type LRSRouteInterface interface {
-	GetRouteID() string
 	ViewName() string
-	IsMaterialized() bool
-	Sink() error
 	SegmentQuery() string
 	LinestringQuery() string
+	Release()
 }
 
 func NewLRSRoute(route_id string, recs []arrow.RecordBatch, crs string) LRSRoute {
@@ -342,7 +340,7 @@ func (l *LRSRoute) LinestringQuery() string {
 		}
 	} else {
 		query := `
-		select ST_Makeline(
+		select {{.RouteID}} as ROUTEID, ST_Makeline(
 		list(ST_Point({{.LatCol}}, {{.LongCol}}) order by {{.VertexSeqCol}} asc)
 		) as linestr 
 		from {{.ViewName}}
@@ -354,6 +352,7 @@ func (l *LRSRoute) LinestringQuery() string {
 			"MvalCol":      l.MValueColumn,
 			"ViewName":     l.ViewName(),
 			"VertexSeqCol": l.VertexSeqColumn,
+			"RouteID":      l.GetRouteID(),
 		}
 
 		templ, err := template.New("queryTemplate").Parse(query)
