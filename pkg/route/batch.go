@@ -37,10 +37,17 @@ func (l *LRSRouteBatch) AddRoute(route LRSRoute) {
 			}
 		}
 
-		l.sourceFiles.Point = append(l.sourceFiles.Point, sourceFile{
-			filePath: *pointFile,
-			routes:   []string{route.GetRouteID()},
-		})
+		if !route.push_down {
+			l.sourceFiles.Point = append(l.sourceFiles.Point, sourceFile{
+				filePath: *pointFile,
+				routes:   []string{},
+			})
+		} else {
+			l.sourceFiles.Point = append(l.sourceFiles.Point, sourceFile{
+				filePath: *pointFile,
+				routes:   []string{route.GetRouteID()},
+			})
+		}
 	}
 
 SkipPoint:
@@ -56,10 +63,17 @@ SkipPoint:
 			}
 		}
 
-		l.sourceFiles.Segment = append(l.sourceFiles.Segment, sourceFile{
-			filePath: *segmentFile,
-			routes:   []string{route.GetRouteID()},
-		})
+		if !route.push_down {
+			l.sourceFiles.Segment = append(l.sourceFiles.Segment, sourceFile{
+				filePath: *segmentFile,
+				routes:   []string{},
+			})
+		} else {
+			l.sourceFiles.Segment = append(l.sourceFiles.Segment, sourceFile{
+				filePath: *segmentFile,
+				routes:   []string{route.GetRouteID()},
+			})
+		}
 	}
 
 SkipSegment:
@@ -75,10 +89,17 @@ SkipSegment:
 			}
 		}
 
-		l.sourceFiles.LineString = append(l.sourceFiles.LineString, sourceFile{
-			filePath: *linestrFile,
-			routes:   []string{route.GetRouteID()},
-		})
+		if !route.push_down {
+			l.sourceFiles.LineString = append(l.sourceFiles.LineString, sourceFile{
+				filePath: *linestrFile,
+				routes:   []string{},
+			})
+		} else {
+			l.sourceFiles.LineString = append(l.sourceFiles.LineString, sourceFile{
+				filePath: *linestrFile,
+				routes:   []string{route.GetRouteID()},
+			})
+		}
 	}
 
 SkipLinestr:
