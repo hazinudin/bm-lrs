@@ -50,6 +50,7 @@ func Transform(obj geom.Geometry, crs string, inverted bool) (geom.Geometry, err
 	// Open database connection
 	db := sql.OpenDB(c)
 	db.ExecContext(context.Background(), "install spatial; load spatial;")
+	defer db.Close()
 
 	// Create geometry colum
 	var cte_query string
