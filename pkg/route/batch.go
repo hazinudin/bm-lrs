@@ -29,51 +29,57 @@ func (l *LRSRouteBatch) AddRoute(route LRSRoute) {
 	// Check if Point file exists in sourceFiles, if not add it
 	pointFile := route.GetPointFile()
 
-	for i := range l.sourceFiles.Point {
-		if l.sourceFiles.Point[i].filePath == *pointFile {
-			l.sourceFiles.Point[i].routes = append(l.sourceFiles.Point[i].routes, route.GetRouteID())
-			goto SkipPoint
+	if pointFile != nil {
+		for i := range l.sourceFiles.Point {
+			if l.sourceFiles.Point[i].filePath == *pointFile {
+				l.sourceFiles.Point[i].routes = append(l.sourceFiles.Point[i].routes, route.GetRouteID())
+				goto SkipPoint
+			}
 		}
-	}
 
-	l.sourceFiles.Point = append(l.sourceFiles.Point, sourceFile{
-		filePath: *pointFile,
-		routes:   []string{route.GetRouteID()},
-	})
+		l.sourceFiles.Point = append(l.sourceFiles.Point, sourceFile{
+			filePath: *pointFile,
+			routes:   []string{route.GetRouteID()},
+		})
+	}
 
 SkipPoint:
 
 	// Check if Segment file exists in sourceFiles, if not add it
 	segmentFile := route.GetSegmentFile()
 
-	for i := range l.sourceFiles.Segment {
-		if l.sourceFiles.Segment[i].filePath == *segmentFile {
-			l.sourceFiles.Segment[i].routes = append(l.sourceFiles.Segment[i].routes, route.GetRouteID())
-			goto SkipSegment
+	if segmentFile != nil {
+		for i := range l.sourceFiles.Segment {
+			if l.sourceFiles.Segment[i].filePath == *segmentFile {
+				l.sourceFiles.Segment[i].routes = append(l.sourceFiles.Segment[i].routes, route.GetRouteID())
+				goto SkipSegment
+			}
 		}
-	}
 
-	l.sourceFiles.Segment = append(l.sourceFiles.Segment, sourceFile{
-		filePath: *segmentFile,
-		routes:   []string{route.GetRouteID()},
-	})
+		l.sourceFiles.Segment = append(l.sourceFiles.Segment, sourceFile{
+			filePath: *segmentFile,
+			routes:   []string{route.GetRouteID()},
+		})
+	}
 
 SkipSegment:
 
 	// Check if Linestring file exists in sourceFiles, if not add it
 	linestrFile := route.GetLineFile()
 
-	for i := range l.sourceFiles.LineString {
-		if l.sourceFiles.LineString[i].filePath == *linestrFile {
-			l.sourceFiles.LineString[i].routes = append(l.sourceFiles.LineString[i].routes, route.GetRouteID())
-			goto SkipLinestr
+	if linestrFile != nil {
+		for i := range l.sourceFiles.LineString {
+			if l.sourceFiles.LineString[i].filePath == *linestrFile {
+				l.sourceFiles.LineString[i].routes = append(l.sourceFiles.LineString[i].routes, route.GetRouteID())
+				goto SkipLinestr
+			}
 		}
-	}
 
-	l.sourceFiles.LineString = append(l.sourceFiles.LineString, sourceFile{
-		filePath: *linestrFile,
-		routes:   []string{route.GetRouteID()},
-	})
+		l.sourceFiles.LineString = append(l.sourceFiles.LineString, sourceFile{
+			filePath: *linestrFile,
+			routes:   []string{route.GetRouteID()},
+		})
+	}
 
 SkipLinestr:
 
