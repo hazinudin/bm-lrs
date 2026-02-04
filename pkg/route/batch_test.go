@@ -162,7 +162,7 @@ func TestLRSRouteBatch(t *testing.T) {
 		batch.AddRoute(route2)
 
 		query := batch.ViewName()
-		expected := `(SELECT * FROM "shared_point.parquet" WHERE ROUTEID IN ('01001','01002'))`
+		expected := `(SELECT * FROM "shared_point.parquet" WHERE ROUTEID IN ['01001','01002'])`
 		if query != expected {
 			t.Errorf("Expected query %s, got %s", expected, query)
 		}
