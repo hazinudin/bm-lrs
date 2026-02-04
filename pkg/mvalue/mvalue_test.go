@@ -225,4 +225,10 @@ func TestCalculatePointsMValueBatch(t *testing.T) {
 			t.Errorf("Point %d: expected MVAL %f, got %f", i, expected, mvals.Value(i))
 		}
 	}
+
+	result.Sink()
+	defer result.Release()
+
+	eventFile := result.GetSourceFile()
+	assert.NotNil(t, eventFile)
 }
