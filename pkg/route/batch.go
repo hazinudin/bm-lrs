@@ -6,8 +6,9 @@ import (
 )
 
 type sourceFile struct {
-	filePath string
-	routes   []string
+	filePath     string
+	routes       []string
+	materialized bool
 }
 type batchSourceFiles struct {
 	Point      []sourceFile
@@ -24,7 +25,7 @@ type LRSRouteBatch struct {
 }
 
 // Add LRSRoute to the batch
-func (l *LRSRouteBatch) AddRoute(route LRSRoute) {
+func (l *LRSRouteBatch) AddRoute(route LRSRoute) error {
 	if l.routes == nil {
 		l.routes = make(map[string]LRSRoute)
 	}
@@ -39,7 +40,10 @@ func (l *LRSRouteBatch) AddRoute(route LRSRoute) {
 
 	// Check if the route is materialized or not.
 	if !route.IsMaterialized() {
-		route.Sink()
+		err := route.Sink()
+		if err != nil {
+			return fmt.Errorf("failed to sink point RecordBatch: %v", err)
+		}
 	}
 
 	// Check if Point file exists in sourceFiles, if not add it
@@ -55,13 +59,15 @@ func (l *LRSRouteBatch) AddRoute(route LRSRoute) {
 
 		if !route.push_down {
 			l.sourceFiles.Point = append(l.sourceFiles.Point, sourceFile{
-				filePath: *pointFile,
-				routes:   []string{},
+				filePath:     *pointFile,
+				routes:       []string{},
+				materialized: true,
 			})
 		} else {
 			l.sourceFiles.Point = append(l.sourceFiles.Point, sourceFile{
-				filePath: *pointFile,
-				routes:   []string{route.GetRouteID()},
+				filePath:     *pointFile,
+				routes:       []string{route.GetRouteID()},
+				materialized: true,
 			})
 		}
 	}
@@ -81,15 +87,23 @@ SkipPoint:
 
 		if !route.push_down {
 			l.sourceFiles.Segment = append(l.sourceFiles.Segment, sourceFile{
-				filePath: *segmentFile,
-				routes:   []string{},
+				filePath:     *segmentFile,
+				routes:       []string{},
+				materialized: true,
 			})
 		} else {
 			l.sourceFiles.Segment = append(l.sourceFiles.Segment, sourceFile{
-				filePath: *segmentFile,
-				routes:   []string{route.GetRouteID()},
+				filePath:     *segmentFile,
+				routes:       []string{route.GetRouteID()},
+				materialized: true,
 			})
 		}
+	} else {
+		l.sourceFiles.Segment = append(l.sourceFiles.Segment, sourceFile{
+			filePath:     route.SegmentQuery(),
+			routes:       []string{},
+			materialized: false,
+		})
 	}
 
 SkipSegment:
@@ -116,12 +130,20 @@ SkipSegment:
 				routes:   []string{route.GetRouteID()},
 			})
 		}
+	} else {
+		l.sourceFiles.LineString = append(l.sourceFiles.LineString, sourceFile{
+			filePath:     route.LinestringQuery(),
+			routes:       []string{},
+			materialized: false,
+		})
 	}
 
 SkipLinestr:
 
 	// Finally add route to routes map
 	l.routes[route.GetRouteID()] = route
+
+	return nil
 }
 
 // Release all temporary files or RecordBatches
@@ -140,11 +162,15 @@ func (l *LRSRouteBatch) ViewName() string {
 	var queries []string
 	var noPushDownFiles []string
 	for _, sf := range l.sourceFiles.Point {
-		if len(sf.routes) == 0 {
-			noPushDownFiles = append(noPushDownFiles, sf.filePath)
+		if sf.materialized {
+			if len(sf.routes) == 0 {
+				noPushDownFiles = append(noPushDownFiles, sf.filePath)
+			} else {
+				routeList := strings.Join(sf.routes, "','")
+				queries = append(queries, fmt.Sprintf(`SELECT * FROM "%s" WHERE ROUTEID IN ['%s']`, sf.filePath, routeList))
+			}
 		} else {
-			routeList := strings.Join(sf.routes, "','")
-			queries = append(queries, fmt.Sprintf(`SELECT * FROM "%s" WHERE ROUTEID IN ('%s')`, sf.filePath, routeList))
+			queries = append(queries, sf.filePath)
 		}
 	}
 
@@ -165,11 +191,15 @@ func (l *LRSRouteBatch) SegmentQuery() string {
 	var queries []string
 	var noPushDownFiles []string
 	for _, sf := range l.sourceFiles.Segment {
-		if len(sf.routes) == 0 {
-			noPushDownFiles = append(noPushDownFiles, sf.filePath)
+		if sf.materialized {
+			if len(sf.routes) == 0 {
+				noPushDownFiles = append(noPushDownFiles, sf.filePath)
+			} else {
+				routeList := strings.Join(sf.routes, "','")
+				queries = append(queries, fmt.Sprintf(`SELECT * FROM "%s" WHERE ROUTEID IN ['%s']`, sf.filePath, routeList))
+			}
 		} else {
-			routeList := strings.Join(sf.routes, "','")
-			queries = append(queries, fmt.Sprintf(`SELECT * FROM "%s" WHERE ROUTEID IN ('%s')`, sf.filePath, routeList))
+			queries = append(queries, sf.filePath)
 		}
 	}
 
@@ -178,7 +208,7 @@ func (l *LRSRouteBatch) SegmentQuery() string {
 		queries = append(queries, noPushDownQuery)
 	}
 
-	return strings.Join(queries, " UNION ALL ") + ";"
+	return strings.Join(queries, " UNION ALL ")
 }
 
 // LinestringQuery returns a query for loading linestring data from all source files in the batch
@@ -190,11 +220,15 @@ func (l *LRSRouteBatch) LinestringQuery() string {
 	var queries []string
 	var noPushDownFiles []string
 	for _, sf := range l.sourceFiles.LineString {
-		if len(sf.routes) == 0 {
-			noPushDownFiles = append(noPushDownFiles, sf.filePath)
+		if sf.materialized {
+			if len(sf.routes) == 0 {
+				noPushDownFiles = append(noPushDownFiles, sf.filePath)
+			} else {
+				routeList := strings.Join(sf.routes, "','")
+				queries = append(queries, fmt.Sprintf(`SELECT * FROM "%s" WHERE ROUTEID IN ['%s']`, sf.filePath, routeList))
+			}
 		} else {
-			routeList := strings.Join(sf.routes, "','")
-			queries = append(queries, fmt.Sprintf(`SELECT * FROM "%s" WHERE ROUTEID IN ('%s')`, sf.filePath, routeList))
+			queries = append(queries, sf.filePath)
 		}
 	}
 
@@ -203,7 +237,7 @@ func (l *LRSRouteBatch) LinestringQuery() string {
 		queries = append(queries, noPushDownQuery)
 	}
 
-	return strings.Join(queries, " UNION ALL ") + ";"
+	return strings.Join(queries, " UNION ALL ")
 }
 
 func (l *LRSRouteBatch) LatitudeColumn() string {
