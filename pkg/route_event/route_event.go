@@ -27,8 +27,8 @@ type LRSEvents struct {
 	sourceFile   *string
 }
 
-func NewLRSEvents(records []arrow.RecordBatch, crs string) *LRSEvents {
-	return &LRSEvents{
+func NewLRSEvents(records []arrow.RecordBatch, crs string) (*LRSEvents, error) {
+	out := &LRSEvents{
 		routeIDCol:   "ROUTEID",
 		latCol:       "LAT",
 		lonCol:       "LON",
@@ -37,6 +37,32 @@ func NewLRSEvents(records []arrow.RecordBatch, crs string) *LRSEvents {
 		records:      records,
 		crs:          crs,
 	}
+
+	if len(records) > 0 {
+		if err := out.validate(); err != nil {
+			return nil, err
+		}
+	}
+
+	return out, nil
+}
+
+func (e *LRSEvents) validate() error {
+	if len(e.records) == 0 {
+		return nil
+	}
+
+	schema := e.records[0].Schema()
+	requiredCols := []string{e.routeIDCol, e.latCol, e.lonCol}
+
+	for _, col := range requiredCols {
+		indices := schema.FieldIndices(col)
+		if len(indices) == 0 {
+			return fmt.Errorf("required column %s not found in records", col)
+		}
+	}
+
+	return nil
 }
 
 // NewLRSEventsFromGeoJSON creates LRSEvents from GeoJSON byte array
@@ -132,7 +158,7 @@ func NewLRSEventsFromGeoJSON(data []byte, crs string) (*LRSEvents, error) {
 	}
 
 	rec := builder.NewRecordBatch()
-	return NewLRSEvents([]arrow.RecordBatch{rec}, crs), nil
+	return NewLRSEvents([]arrow.RecordBatch{rec}, crs)
 }
 
 // GetCRS returns the coordinate reference system of the events

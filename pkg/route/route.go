@@ -87,6 +87,7 @@ func NewLRSRouteFromESRIGeoJSON(route_id string, jsonbyte []byte, feature_idx in
 			{Name: "LON", Type: arrow.PrimitiveTypes.Float64},
 			{Name: "MVAL", Type: arrow.PrimitiveTypes.Float64},
 			{Name: "VERTEX_SEQ", Type: arrow.PrimitiveTypes.Int32},
+			{Name: "ROUTEID", Type: arrow.BinaryTypes.String},
 		},
 		nil,
 	)
@@ -96,35 +97,41 @@ func NewLRSRouteFromESRIGeoJSON(route_id string, jsonbyte []byte, feature_idx in
 	long_builder := array.NewFloat64Builder(pool)
 	mval_builder := array.NewFloat64Builder(pool)
 	vertex_seq_builder := array.NewInt32Builder(pool)
+	routeid_builder := array.NewStringBuilder(pool)
 
 	defer lat_builder.Release()
 	defer long_builder.Release()
 	defer mval_builder.Release()
 	defer vertex_seq_builder.Release()
+	defer routeid_builder.Release()
 
 	// Append data
 	var lat_rows []float64
 	var long_rows []float64
 	var mval_rows []float64
 	var vertex_seq_rows []int32
+	var route_id_rows []string
 
 	for i, vertex := range vertexes {
 		long_rows = append(long_rows, vertex.([]any)[0].(float64))
 		lat_rows = append(lat_rows, vertex.([]any)[1].(float64))
 		mval_rows = append(mval_rows, vertex.([]any)[2].(float64))
 		vertex_seq_rows = append(vertex_seq_rows, int32(i))
+		route_id_rows = append(route_id_rows, route_id)
 	}
 
 	lat_builder.AppendValues(lat_rows, nil)
 	long_builder.AppendValues(long_rows, nil)
 	mval_builder.AppendValues(mval_rows, nil)
 	vertex_seq_builder.AppendValues(vertex_seq_rows, nil)
+	routeid_builder.AppendValues(route_id_rows, nil)
 
 	// Arrays
 	lat_arr := lat_builder.NewArray()
 	long_arr := long_builder.NewArray()
 	mval_arr := mval_builder.NewArray()
 	vertex_seq_arr := vertex_seq_builder.NewArray()
+	routeid_arr := routeid_builder.NewArray()
 
 	rec := array.NewRecordBatch(
 		schema,
@@ -133,6 +140,7 @@ func NewLRSRouteFromESRIGeoJSON(route_id string, jsonbyte []byte, feature_idx in
 			long_arr,
 			mval_arr,
 			vertex_seq_arr,
+			routeid_arr,
 		},
 		int64(vertex_seq_arr.Len()),
 	)
@@ -232,7 +240,7 @@ func (l *LRSRoute) ViewName() string {
 		if l.push_down {
 			return fmt.Sprintf(`(select * from "%s" where ROUTEID = '%s')`, *l.source_files.Point, l.GetRouteID())
 		}
-		return fmt.Sprintf(`(select *, '%s' as ROUTEID from "%s")`, l.GetRouteID(), *l.source_files.Point)
+		return fmt.Sprintf(`(select * from "%s")`, *l.source_files.Point)
 	} else {
 		return "lrs_recordbatch"
 	}

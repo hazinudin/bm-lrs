@@ -3,6 +3,7 @@ package mvalue
 import (
 	"bm-lrs/pkg/geom"
 	"bm-lrs/pkg/route"
+	"bm-lrs/pkg/route_event"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCalculatePointsMValue(t *testing.T) {
@@ -25,6 +27,7 @@ func TestCalculatePointsMValue(t *testing.T) {
 			{Name: "LAT", Type: arrow.PrimitiveTypes.Float64},
 			{Name: "LON", Type: arrow.PrimitiveTypes.Float64},
 			{Name: "MVAL", Type: arrow.PrimitiveTypes.Float64},
+			{Name: "ROUTEID", Type: arrow.BinaryTypes.String},
 		},
 		nil,
 	)
@@ -33,19 +36,23 @@ func TestCalculatePointsMValue(t *testing.T) {
 	lat_builder := array.NewFloat64Builder(pool)
 	long_builder := array.NewFloat64Builder(pool)
 	mval_builder := array.NewFloat64Builder(pool)
+	linkid_builder := array.NewStringBuilder(pool)
 
 	defer lat_builder.Release()
 	defer long_builder.Release()
 	defer mval_builder.Release()
+	defer linkid_builder.Release()
 
 	long_builder.AppendValues([]float64{-2191377.9268000014, -2191367.4395999983}, nil)
 	lat_builder.AppendValues([]float64{602211.73600000143, 602215.71829999983}, nil)
 	mval_builder.AppendValues(make([]float64, 2), nil)
+	linkid_builder.AppendValues([]string{"01001", "01001"}, nil)
 
 	// Arrays
 	lat_arr := lat_builder.NewArray()
 	long_arr := long_builder.NewArray()
 	mval_arr := mval_builder.NewArray()
+	linkid_arr := linkid_builder.NewArray()
 
 	// Record
 	rec := array.NewRecordBatch(
@@ -54,11 +61,13 @@ func TestCalculatePointsMValue(t *testing.T) {
 			lat_arr,
 			long_arr,
 			mval_arr,
+			linkid_arr,
 		},
 		int64(lat_arr.Len()),
 	)
 
-	points := geom.NewPoints([]arrow.RecordBatch{rec}, geom.LAMBERT_WKT)
+	points, err := route_event.NewLRSEvents([]arrow.RecordBatch{rec}, geom.LAMBERT_WKT)
+	assert.NoError(t, err)
 	defer points.Release()
 
 	// Read test data JSON
@@ -88,7 +97,7 @@ func TestCalculatePointsMValue(t *testing.T) {
 	lrs.Sink()
 
 	// 3. Calculate M-Values
-	result, err := CalculatePointsMValue(context.Background(), &lrs, points)
+	result, err := CalculatePointsMValue(context.Background(), &lrs, *points)
 	if err != nil {
 		t.Fatalf("CalculatePointsMValue failed: %v", err)
 	}
@@ -99,7 +108,7 @@ func TestCalculatePointsMValue(t *testing.T) {
 	}
 
 	// Check results
-	mvals := resultRecs[0].Column(2).(*array.Float64)
+	mvals := resultRecs[0].Column(3).(*array.Float64)
 	expectedMVals := []float64{0, 0.0111}
 	for i, expected := range expectedMVals {
 		if math.Abs(mvals.Value(i)-expected) > 0.001 {
@@ -108,13 +117,19 @@ func TestCalculatePointsMValue(t *testing.T) {
 	}
 
 	// Check dist_to_line
-	dists := resultRecs[0].Column(3).(*array.Float64)
+	dists := resultRecs[0].Column(4).(*array.Float64)
 	expectedDists := []float64{0, 0}
 	for i, expected := range expectedDists {
 		if math.Abs(dists.Value(i)-expected) > 0.001 {
 			t.Errorf("Point %d: expected dist %f, got %f", i, expected, dists.Value(i))
 		}
 	}
+
+	result.Sink()
+	eventFile := result.GetSourceFile()
+	assert.NotNil(t, eventFile)
+
+	result.Release()
 }
 
 func TestCalculatePointsMValueBatch(t *testing.T) {
@@ -126,6 +141,7 @@ func TestCalculatePointsMValueBatch(t *testing.T) {
 			{Name: "LAT", Type: arrow.PrimitiveTypes.Float64},
 			{Name: "LON", Type: arrow.PrimitiveTypes.Float64},
 			{Name: "MVAL", Type: arrow.PrimitiveTypes.Float64},
+			{Name: "ROUTEID", Type: arrow.BinaryTypes.String},
 		},
 		nil,
 	)
@@ -133,10 +149,12 @@ func TestCalculatePointsMValueBatch(t *testing.T) {
 	lat_builder := array.NewFloat64Builder(pool)
 	long_builder := array.NewFloat64Builder(pool)
 	mval_builder := array.NewFloat64Builder(pool)
+	routeid_builder := array.NewStringBuilder(pool)
 
 	defer lat_builder.Release()
 	defer long_builder.Release()
 	defer mval_builder.Release()
+	defer routeid_builder.Release()
 
 	// Points for Route 01001
 	long_builder.AppendValues([]float64{-2191377.9268000014, -2191367.4395999983}, nil)
@@ -147,11 +165,13 @@ func TestCalculatePointsMValueBatch(t *testing.T) {
 	lat_builder.AppendValues([]float64{593568.98829999566, 593544.87000000477}, nil)
 
 	mval_builder.AppendValues(make([]float64, 4), nil)
+	routeid_builder.AppendValues([]string{"01001", "01001", "01002", "01002"}, nil)
 
 	// Arrays
 	lat_arr := lat_builder.NewArray()
 	long_arr := long_builder.NewArray()
 	mval_arr := mval_builder.NewArray()
+	routeid_arr := routeid_builder.NewArray()
 
 	// Record
 	rec := array.NewRecordBatch(
@@ -160,11 +180,13 @@ func TestCalculatePointsMValueBatch(t *testing.T) {
 			lat_arr,
 			long_arr,
 			mval_arr,
+			routeid_arr,
 		},
 		int64(lat_arr.Len()),
 	)
 
-	points := geom.NewPoints([]arrow.RecordBatch{rec}, geom.LAMBERT_WKT)
+	points, err := route_event.NewLRSEvents([]arrow.RecordBatch{rec}, geom.LAMBERT_WKT)
+	assert.NoError(t, err)
 	defer points.Release()
 
 	// 2. Setup LRSRouteBatch
@@ -185,7 +207,7 @@ func TestCalculatePointsMValueBatch(t *testing.T) {
 	batch.AddRoute(lrs2)
 
 	// 3. Calculate M-Values
-	result, err := CalculatePointsMValue(context.Background(), batch, points)
+	result, err := CalculatePointsMValue(context.Background(), batch, *points)
 	if err != nil {
 		t.Fatalf("CalculatePointsMValue failed: %v", err)
 	}
@@ -196,7 +218,7 @@ func TestCalculatePointsMValueBatch(t *testing.T) {
 	}
 
 	// Check results
-	mvals := resultRecs[0].Column(2).(*array.Float64)
+	mvals := resultRecs[0].Column(3).(*array.Float64)
 	expectedMVals := []float64{0, 0.0111, 0, 0.03536}
 	for i, expected := range expectedMVals {
 		if math.Abs(mvals.Value(i)-expected) > 0.001 {

@@ -41,7 +41,8 @@ func createMockRecordBatch() arrow.RecordBatch {
 func TestNewLRSEvents(t *testing.T) {
 	rec := createMockRecordBatch()
 	crs := "EPSG:4326"
-	events := route_event.NewLRSEvents([]arrow.RecordBatch{rec}, crs)
+	events, err := route_event.NewLRSEvents([]arrow.RecordBatch{rec}, crs)
+	assert.NoError(t, err)
 
 	assert.NotNil(t, events)
 	assert.Equal(t, crs, events.GetCRS())
@@ -60,7 +61,8 @@ func TestNewLRSEvents(t *testing.T) {
 func TestGetRouteIDs(t *testing.T) {
 	rec := createMockRecordBatch()
 	defer rec.Release()
-	events := route_event.NewLRSEvents([]arrow.RecordBatch{rec}, "")
+	events, err := route_event.NewLRSEvents([]arrow.RecordBatch{rec}, "")
+	assert.NoError(t, err)
 
 	routeIDs := events.GetRouteIDs()
 	assert.ElementsMatch(t, []string{"01002"}, routeIDs)
@@ -91,9 +93,10 @@ func TestNewLRSEventsFromGeoJSON(t *testing.T) {
 
 func TestLRSEventsSinkAndRelease(t *testing.T) {
 	rec := createMockRecordBatch()
-	events := route_event.NewLRSEvents([]arrow.RecordBatch{rec}, "")
+	events, err := route_event.NewLRSEvents([]arrow.RecordBatch{rec}, "")
+	assert.NoError(t, err)
 
-	err := events.Sink()
+	err = events.Sink()
 	assert.NoError(t, err)
 
 	sourceFile := events.GetSourceFile()
@@ -117,7 +120,8 @@ func TestLRSEventsSinkAndRelease(t *testing.T) {
 }
 
 func TestLRSEventsColumnGettersSetters(t *testing.T) {
-	events := route_event.NewLRSEvents(nil, "")
+	events, err := route_event.NewLRSEvents(nil, "")
+	assert.NoError(t, err)
 
 	assert.Equal(t, "ROUTEID", events.RouteIDColumn())
 	events.SetRouteIDColumn("LINKID")
@@ -138,4 +142,24 @@ func TestLRSEventsColumnGettersSetters(t *testing.T) {
 	assert.Equal(t, "DIST_TO_LRS", events.DistanceToLRSColumn())
 	events.SetDistanceToLRSColumn("distance")
 	assert.Equal(t, "distance", events.DistanceToLRSColumn())
+}
+
+func TestNewLRSEventsValidation(t *testing.T) {
+	pool := memory.NewGoAllocator()
+	schema := arrow.NewSchema(
+		[]arrow.Field{
+			{Name: "LAT", Type: arrow.PrimitiveTypes.Float64},
+			{Name: "LON", Type: arrow.PrimitiveTypes.Float64},
+		},
+		nil,
+	)
+	rb := array.NewRecordBuilder(pool, schema)
+	defer rb.Release()
+	rec := rb.NewRecordBatch()
+	defer rec.Release()
+
+	// Missing ROUTEID
+	_, err := route_event.NewLRSEvents([]arrow.RecordBatch{rec}, "")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "required column ROUTEID not found")
 }

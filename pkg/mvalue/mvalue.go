@@ -1,8 +1,8 @@
 package mvalue
 
 import (
-	"bm-lrs/pkg/geom"
 	"bm-lrs/pkg/route"
+	"bm-lrs/pkg/route_event"
 	"context"
 	"database/sql"
 	"fmt"
@@ -14,7 +14,7 @@ import (
 
 // CalculatePointsMValue calculates the M-Value of points relative to an LRS route.
 // It uses DuckDB spatial extension for shortest line and interpolation.
-func CalculatePointsMValue(ctx context.Context, lrs route.LRSRouteInterface, points geom.Points) (*geom.Points, error) {
+func CalculatePointsMValue(ctx context.Context, lrs route.LRSRouteInterface, points route_event.LRSEvents) (*route_event.LRSEvents, error) {
 	c, err := duckdb.NewConnector("", nil)
 
 	if err != nil {
@@ -83,13 +83,16 @@ func CalculatePointsMValue(ctx context.Context, lrs route.LRSRouteInterface, poi
 	query := fmt.Sprintf(`
 	WITH shortest_to_lrs AS (
 		SELECT
+			a.ROUTEID,
 			point_id, 
 			ST_ShortestLine(ST_Point("%s", "%s"), linestr) AS shortestline
-		FROM points_table
-		CROSS JOIN lrs_line_table
+		FROM points_table a 
+		JOIN lrs_line_table b
+		ON a.ROUTEID = b.ROUTEID
 	),
 	point_on_line AS (
 		SELECT
+			ROUTEID,
 			point_id,
 			ST_EndPoint(shortestline) AS lambert_vertex,
 			ST_Length(shortestline) AS dist_to_line
@@ -110,6 +113,7 @@ func CalculatePointsMValue(ctx context.Context, lrs route.LRSRouteInterface, poi
 		INNER JOIN lrs_segment_table b
 		ON ST_Y(a.lambert_vertex) <= GREATEST(b."%s", b."%s1") AND ST_Y(a.lambert_vertex) >= LEAST(b."%s", b."%s1")
 		AND ST_X(a.lambert_vertex) <= GREATEST(b."%s", b."%s1") AND ST_X(a.lambert_vertex) >= LEAST(b."%s", b."%s1")
+		AND a.ROUTEID = b.ROUTEID
 	),
 	interpolated AS (
 		SELECT
@@ -129,13 +133,13 @@ func CalculatePointsMValue(ctx context.Context, lrs route.LRSRouteInterface, poi
 	LEFT JOIN best_interpolated i ON p.point_id = i.point_id
 	ORDER BY p.point_id
 	`,
-		points.LatitudeColumn, points.LongitudeColumn,
+		points.LatitudeColumn(), points.LongitudeColumn(),
 		lrs.MValueColumn(), lrs.MValueColumn(),
 		lrs.LatitudeColumn(), lrs.LongitudeColumn(),
 		lrs.LatitudeColumn(), lrs.LongitudeColumn(),
 		lrs.LongitudeColumn(), lrs.LongitudeColumn(), lrs.LongitudeColumn(), lrs.LongitudeColumn(),
 		lrs.LatitudeColumn(), lrs.LatitudeColumn(), lrs.LatitudeColumn(), lrs.LatitudeColumn(),
-		points.MValueColumn, points.MValueColumn)
+		points.MValueColumn(), points.MValueColumn())
 
 	// Debug: check counts
 	var pointsCount, lrsLineCount, lrsSegmentCount int
@@ -161,7 +165,10 @@ func CalculatePointsMValue(ctx context.Context, lrs route.LRSRouteInterface, poi
 		return nil, fmt.Errorf("expected records, got 0. Counts: points=%d, lrs_line=%d, lrs_segment=%d", pointsCount, lrsLineCount, lrsSegmentCount)
 	}
 
-	out := geom.NewPoints(outRecs, points.GetCRS())
+	out, err := route_event.NewLRSEvents(outRecs, points.GetCRS())
+	if err != nil {
+		return nil, err
+	}
 
-	return &out, nil
+	return out, nil
 }
