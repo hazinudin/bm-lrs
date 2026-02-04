@@ -158,6 +158,32 @@ func TestLRSRoute(t *testing.T) {
 	)
 
 	t.Run(
+		"point table view test", func(t *testing.T) {
+			lrs := NewLRSRouteFromESRIGeoJSON(
+				"01001",
+				jsonByte,
+				0,
+				WKT,
+			)
+			defer lrs.Release()
+
+			rr, err := array.NewRecordReader(lrs.GetRecords()[0].Schema(), lrs.GetRecords())
+			if err != nil {
+				t.Error(err)
+			}
+
+			release, err := ar.RegisterView(rr, lrs.ViewName())
+			defer release()
+
+			// Write to parquet file for evaluation
+			_, err = db.QueryContext(context.Background(), fmt.Sprintf("copy %s to 'testdata/lrs_01001_point.parquet' (FORMAT parquet);", lrs.ViewName()))
+			if err != nil {
+				t.Error(err)
+			}
+		},
+	)
+
+	t.Run(
 		"segment table view test", func(t *testing.T) {
 			lrs := NewLRSRouteFromESRIGeoJSON(
 				"01001",

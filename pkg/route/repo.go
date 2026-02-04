@@ -274,9 +274,9 @@ func (r *LRSRouteRepository) GetLatest(ctx context.Context, routeID string) (*LR
 
 	out := &LRSRoute{
 		route_id:        routeID,
-		LatitudeColumn:  "LAT",
-		LongitudeColumn: "LON",
-		MValueColumn:    "MVAL",
+		latitudeCol:     "LAT",
+		longitudeCol:    "LON",
+		mValueCol:       "MVAL",
 		VertexSeqColumn: "VERTEX_SEQ",
 		crs:             "EPSG:4326",
 		source_files: &sourceFiles{

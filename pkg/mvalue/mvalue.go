@@ -14,7 +14,7 @@ import (
 
 // CalculatePointsMValue calculates the M-Value of points relative to an LRS route.
 // It uses DuckDB spatial extension for shortest line and interpolation.
-func CalculatePointsMValue(ctx context.Context, lrs *route.LRSRoute, points geom.Points) (*geom.Points, error) {
+func CalculatePointsMValue(ctx context.Context, lrs route.LRSRouteInterface, points geom.Points) (*geom.Points, error) {
 	c, err := duckdb.NewConnector("", nil)
 
 	if err != nil {
@@ -130,11 +130,11 @@ func CalculatePointsMValue(ctx context.Context, lrs *route.LRSRoute, points geom
 	ORDER BY p.point_id
 	`,
 		points.LatitudeColumn, points.LongitudeColumn,
-		lrs.MValueColumn, lrs.MValueColumn,
-		lrs.LatitudeColumn, lrs.LongitudeColumn,
-		lrs.LatitudeColumn, lrs.LongitudeColumn,
-		lrs.LongitudeColumn, lrs.LongitudeColumn, lrs.LongitudeColumn, lrs.LongitudeColumn,
-		lrs.LatitudeColumn, lrs.LatitudeColumn, lrs.LatitudeColumn, lrs.LatitudeColumn,
+		lrs.MValueColumn(), lrs.MValueColumn(),
+		lrs.LatitudeColumn(), lrs.LongitudeColumn(),
+		lrs.LatitudeColumn(), lrs.LongitudeColumn(),
+		lrs.LongitudeColumn(), lrs.LongitudeColumn(), lrs.LongitudeColumn(), lrs.LongitudeColumn(),
+		lrs.LatitudeColumn(), lrs.LatitudeColumn(), lrs.LatitudeColumn(), lrs.LatitudeColumn(),
 		points.MValueColumn, points.MValueColumn)
 
 	// Debug: check counts

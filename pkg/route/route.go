@@ -27,9 +27,9 @@ type sourceFiles struct {
 type LRSRoute struct {
 	route_id        string
 	records         []arrow.RecordBatch
-	LatitudeColumn  string
-	LongitudeColumn string
-	MValueColumn    string
+	latitudeCol     string
+	longitudeCol    string
+	mValueCol       string
 	VertexSeqColumn string
 	crs             string
 	source_files    *sourceFiles
@@ -42,15 +42,18 @@ type LRSRouteInterface interface {
 	SegmentQuery() string
 	LinestringQuery() string
 	Release()
+	LatitudeColumn() string
+	LongitudeColumn() string
+	MValueColumn() string
 }
 
 func NewLRSRoute(route_id string, recs []arrow.RecordBatch, crs string) LRSRoute {
 	out := LRSRoute{
 		route_id:        route_id,
 		records:         recs,
-		LatitudeColumn:  "LAT",
-		LongitudeColumn: "LON",
-		MValueColumn:    "MVAL",
+		latitudeCol:     "LAT",
+		longitudeCol:    "LON",
+		mValueCol:       "MVAL",
 		VertexSeqColumn: "VERTEX_SEQ",
 		crs:             crs,
 	}
@@ -211,6 +214,18 @@ func (l *LRSRoute) GetAttributes() map[string]any {
 	return out
 }
 
+func (l *LRSRoute) LatitudeColumn() string {
+	return l.latitudeCol
+}
+
+func (l *LRSRoute) LongitudeColumn() string {
+	return l.longitudeCol
+}
+
+func (l *LRSRoute) MValueColumn() string {
+	return l.mValueCol
+}
+
 // DuckDB table view name
 func (l *LRSRoute) ViewName() string {
 	if l.IsMaterialized() {
@@ -308,9 +323,9 @@ func (l *LRSRoute) SegmentQuery() string {
 		`
 
 		data := map[string]string{
-			"LongCol":      l.LongitudeColumn,
-			"LatCol":       l.LatitudeColumn,
-			"MvalCol":      l.MValueColumn,
+			"LongCol":      l.longitudeCol,
+			"LatCol":       l.latitudeCol,
+			"MvalCol":      l.mValueCol,
 			"ViewName":     l.ViewName(),
 			"VertexSeqCol": l.VertexSeqColumn,
 		}
@@ -347,9 +362,9 @@ func (l *LRSRoute) LinestringQuery() string {
 		`
 
 		data := map[string]string{
-			"LongCol":      l.LongitudeColumn,
-			"LatCol":       l.LatitudeColumn,
-			"MvalCol":      l.MValueColumn,
+			"LongCol":      l.longitudeCol,
+			"LatCol":       l.latitudeCol,
+			"MvalCol":      l.mValueCol,
 			"ViewName":     l.ViewName(),
 			"VertexSeqCol": l.VertexSeqColumn,
 			"RouteID":      l.GetRouteID(),

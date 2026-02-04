@@ -16,8 +16,11 @@ type batchSourceFiles struct {
 }
 
 type LRSRouteBatch struct {
-	routes      map[string]LRSRoute
-	sourceFiles *batchSourceFiles
+	routes       map[string]LRSRoute
+	sourceFiles  *batchSourceFiles
+	latitudeCol  string
+	longitudeCol string
+	mValueCol    string
 }
 
 // Add LRSRoute to the batch
@@ -28,6 +31,10 @@ func (l *LRSRouteBatch) AddRoute(route LRSRoute) {
 
 	if l.sourceFiles == nil {
 		l.sourceFiles = &batchSourceFiles{}
+		// Initialize columns from the first route
+		l.latitudeCol = route.LatitudeColumn()
+		l.longitudeCol = route.LongitudeColumn()
+		l.mValueCol = route.MValueColumn()
 	}
 
 	// Check if the route is materialized or not.
@@ -197,4 +204,16 @@ func (l *LRSRouteBatch) LinestringQuery() string {
 	}
 
 	return strings.Join(queries, " UNION ALL ") + ";"
+}
+
+func (l *LRSRouteBatch) LatitudeColumn() string {
+	return l.latitudeCol
+}
+
+func (l *LRSRouteBatch) LongitudeColumn() string {
+	return l.longitudeCol
+}
+
+func (l *LRSRouteBatch) MValueColumn() string {
+	return l.mValueCol
 }
