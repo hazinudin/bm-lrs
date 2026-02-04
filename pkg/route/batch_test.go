@@ -137,4 +137,34 @@ func TestLRSRouteBatch(t *testing.T) {
 			t.Errorf("File %s should not exist after Release", pointFile)
 		}
 	})
+
+	t.Run("ViewName", func(t *testing.T) {
+		batch := &LRSRouteBatch{}
+
+		pointFile := "shared_point.parquet"
+		route1 := LRSRoute{
+			route_id: "01001",
+			source_files: &sourceFiles{
+				Point: &pointFile,
+			},
+		}
+		route1.setPushDown(true)
+
+		route2 := LRSRoute{
+			route_id: "01002",
+			source_files: &sourceFiles{
+				Point: &pointFile,
+			},
+		}
+		route2.setPushDown(true)
+
+		batch.AddRoute(route1)
+		batch.AddRoute(route2)
+
+		query := batch.ViewName()
+		expected := `(SELECT * FROM "shared_point.parquet" WHERE ROUTEID IN ('01001','01002'))`
+		if query != expected {
+			t.Errorf("Expected query %s, got %s", expected, query)
+		}
+	})
 }
