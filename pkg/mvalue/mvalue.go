@@ -140,7 +140,7 @@ func CalculatePointsMValue(ctx context.Context, lrs route.LRSRouteInterface, poi
 		SELECT DISTINCT ON (point_id) * FROM interpolated ORDER BY point_id, dist ASC
 	)
 	SELECT 
-		p.* EXCLUDE ("%s", point_id), 
+		p.* EXCLUDE (%s), 
 		COALESCE(i.m_val, 0) as "%s",
 		i.dist as dist_to_line
 	FROM points_table p
@@ -153,7 +153,7 @@ func CalculatePointsMValue(ctx context.Context, lrs route.LRSRouteInterface, poi
 		lrs.LatitudeColumn(), lrs.LongitudeColumn(),
 		lrs.LongitudeColumn(), lrs.LongitudeColumn(), lrs.LongitudeColumn(), lrs.LongitudeColumn(),
 		lrs.LatitudeColumn(), lrs.LatitudeColumn(), lrs.LatitudeColumn(), lrs.LatitudeColumn(),
-		points.MValueColumn(), points.MValueColumn())
+		excludeClause, points.MValueColumn())
 
 	// Debug: check counts
 	var pointsCount, lrsLineCount, lrsSegmentCount int
