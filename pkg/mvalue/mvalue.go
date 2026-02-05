@@ -78,6 +78,20 @@ func CalculatePointsMValue(ctx context.Context, lrs route.LRSRouteInterface, poi
 		return nil, fmt.Errorf("failed to create lrs segment view: %v", err)
 	}
 
+	// Check if MVAL column exists in input to decide on EXCLUDE
+	hasMVAL := false
+	for _, f := range pointsRecords[0].Schema().Fields() {
+		if f.Name == points.MValueColumn() {
+			hasMVAL = true
+			break
+		}
+	}
+
+	excludeClause := "point_id"
+	if hasMVAL {
+		excludeClause = fmt.Sprintf(`"%s", point_id`, points.MValueColumn())
+	}
+
 	// Construct interpolation query
 	// Using ST_Point(LAT, LON) to match LinestringQuery convention
 	query := fmt.Sprintf(`
