@@ -308,9 +308,9 @@ func (l *LRSRoute) Sink() error {
 func (l *LRSRoute) SegmentQuery() string {
 	if l.GetSegmentFile() != nil {
 		if l.push_down {
-			return fmt.Sprintf(`select * from "%s" where ROUTEID = '%s';`, *l.GetSegmentFile(), l.GetRouteID())
+			return fmt.Sprintf(`select * from "%s" where ROUTEID = '%s'`, *l.GetSegmentFile(), l.GetRouteID())
 		} else {
-			return fmt.Sprintf(`select * from "%s";`, *l.GetSegmentFile())
+			return fmt.Sprintf(`select * from "%s"`, *l.GetSegmentFile())
 		}
 	} else {
 		query := `
@@ -357,9 +357,9 @@ func (l *LRSRoute) SegmentQuery() string {
 func (l *LRSRoute) LinestringQuery() string {
 	if l.GetSegmentFile() != nil {
 		if l.push_down {
-			return fmt.Sprintf(`select * from "%s" where ROUTEID = '%s';`, *l.GetLineFile(), l.GetRouteID())
+			return fmt.Sprintf(`select * from "%s" where ROUTEID = '%s'`, *l.GetLineFile(), l.GetRouteID())
 		} else {
-			return fmt.Sprintf(`select * from "%s";`, *l.GetLineFile())
+			return fmt.Sprintf(`select * from "%s"`, *l.GetLineFile())
 		}
 	} else {
 		query := `
