@@ -79,13 +79,12 @@ func TestSyncFromGeoJSON(t *testing.T) {
 	// Test full sync with Postgres
 	t.Run("sync with postgres", func(t *testing.T) {
 		ctx := context.Background()
-		routeID := "01001"
 
 		// Create repository with Postgres connection
 		repo := NewLRSRouteRepository(connector, testPgConnStr, db)
 
 		// sync
-		err := repo.SyncFromGeoJSON(ctx, routeID, jsonBytes, SyncOptions{Author: "SYSTEM", CommitMsg: "TEST"})
+		err := repo.SyncFromGeoJSON(ctx, jsonBytes, SyncOptions{Author: "SYSTEM", CommitMsg: "TEST"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -103,15 +102,26 @@ func TestSyncFromGeoJSON(t *testing.T) {
 		})
 
 		t.Run("sync second route and merge", func(t *testing.T) {
-			routeID2 := "01002"
+			// Read test GeoJSON data
+			jsonFile2, err := os.Open("./testdata/lrs_01002.json")
+			if err != nil {
+				t.Fatalf("Failed to open test JSON: %v", err)
+			}
+			defer jsonFile2.Close()
+
+			jsonBytes2, err := io.ReadAll(jsonFile2)
+			if err != nil {
+				t.Fatalf("Failed to read test JSON: %v", err)
+			}
+
 			// Sync same json but as different route
-			err := repo.SyncFromGeoJSON(ctx, routeID2, jsonBytes, SyncOptions{Author: "SYSTEM", CommitMsg: "TEST2"})
+			err = repo.SyncFromGeoJSON(ctx, jsonBytes2, SyncOptions{Author: "SYSTEM", CommitMsg: "TEST2"})
 			if err != nil {
 				t.Fatalf("Failed to sync second route: %v", err)
 			}
 
 			// Verify we can get the second route
-			lrs2, err := repo.GetLatest(ctx, routeID2)
+			lrs2, err := repo.GetLatest(ctx, "01002")
 			if err != nil {
 				t.Fatalf("Failed to get second route: %v", err)
 			}
@@ -163,8 +173,8 @@ func TestSyncFromGeoJSON(t *testing.T) {
 			var fetchedRouteID string
 			if rows2.Next() {
 				rows2.Scan(&fetchedRouteID)
-				if fetchedRouteID != routeID2 {
-					t.Errorf("Expected routeID %s, got %s", routeID2, fetchedRouteID)
+				if fetchedRouteID != "01002" {
+					t.Errorf("Expected routeID %s, got %s", "01002", fetchedRouteID)
 				}
 			}
 			if rows2.Next() {
@@ -304,7 +314,7 @@ func TestSync(t *testing.T) {
 	repo := NewLRSRouteRepository(connector, testPgConnStr, db)
 
 	ctx = context.Background()
-	err = repo.Sync(ctx, []string{"01001"}, SyncOptions{Author: "TESTER", CommitMsg: "MOCK SYNC"})
+	err = repo.Sync(ctx, []string{"01001", "01002", "15001"}, SyncOptions{Author: "TESTER", CommitMsg: "MOCK SYNC"})
 	if err != nil {
 		t.Fatalf("Sync failed: %v", err)
 	}
@@ -328,4 +338,5 @@ func TestSync(t *testing.T) {
 
 	// Cleanup
 	db.ExecContext(ctx, "DELETE FROM postgres_db.lrs_catalogs WHERE AUTHOR = 'TESTER'")
+	db.ExecContext(ctx, "DROP TABLE IF EXISTS postgres_db.lrs_routes")
 }
