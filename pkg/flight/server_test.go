@@ -74,7 +74,7 @@ func TestDoExchange(t *testing.T) {
 	jsonBytes, err := os.ReadFile("../route/testdata/lrs_01001.json")
 	require.NoError(t, err)
 
-	err = repo.SyncFromGeoJSON(ctx, "01001", jsonBytes, route.SyncOptions{Author: "TEST", CommitMsg: "FLIGHT TEST"})
+	err = repo.SyncFromGeoJSON(ctx, jsonBytes, route.SyncOptions{Author: "TEST", CommitMsg: "FLIGHT TEST"})
 	require.NoError(t, err)
 
 	// Start server on static port 8080 for test

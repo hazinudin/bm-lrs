@@ -112,7 +112,6 @@ func TestTransform(t *testing.T) {
 			jsonByte, _ := io.ReadAll(jsonFile)
 
 			lrs := route.NewLRSRouteFromESRIGeoJSON(
-				"01001",
 				jsonByte,
 				0,
 				lambert_wkt,

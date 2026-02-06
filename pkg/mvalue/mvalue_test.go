@@ -87,7 +87,6 @@ func TestCalculatePointsMValue(t *testing.T) {
 	json.Unmarshal([]byte(jsonByte), &jsonContent)
 
 	lrs := route.NewLRSRouteFromESRIGeoJSON(
-		"01001",
 		jsonByte,
 		0,
 		geom.LAMBERT_WKT,
@@ -194,14 +193,14 @@ func TestCalculatePointsMValueBatch(t *testing.T) {
 
 	// Load Route 01001
 	jsonByte1, _ := os.ReadFile("../route/testdata/lrs_01001.json")
-	lrs1 := route.NewLRSRouteFromESRIGeoJSON("01001", jsonByte1, 0, geom.LAMBERT_WKT)
+	lrs1 := route.NewLRSRouteFromESRIGeoJSON(jsonByte1, 0, geom.LAMBERT_WKT)
 	defer lrs1.Release()
 	lrs1.Sink()
 	batch.AddRoute(lrs1)
 
 	// Load Route 01002
 	jsonByte2, _ := os.ReadFile("../route/testdata/lrs_01002.json")
-	lrs2 := route.NewLRSRouteFromESRIGeoJSON("01002", jsonByte2, 0, geom.LAMBERT_WKT)
+	lrs2 := route.NewLRSRouteFromESRIGeoJSON(jsonByte2, 0, geom.LAMBERT_WKT)
 	defer lrs2.Release()
 	lrs2.Sink()
 	batch.AddRoute(lrs2)

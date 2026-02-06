@@ -132,7 +132,6 @@ func TestLRSRoute(t *testing.T) {
 	t.Run(
 		"initialize from geojson", func(t *testing.T) {
 			lrs := NewLRSRouteFromESRIGeoJSON(
-				"01001",
 				jsonByte,
 				0,
 				WKT,
@@ -144,7 +143,6 @@ func TestLRSRoute(t *testing.T) {
 	t.Run(
 		"geometry type test", func(t *testing.T) {
 			lrs := NewLRSRouteFromESRIGeoJSON(
-				"01001",
 				jsonByte,
 				0,
 				WKT,
@@ -160,7 +158,6 @@ func TestLRSRoute(t *testing.T) {
 	t.Run(
 		"point table view test", func(t *testing.T) {
 			lrs := NewLRSRouteFromESRIGeoJSON(
-				"01001",
 				jsonByte,
 				0,
 				WKT,
@@ -186,7 +183,6 @@ func TestLRSRoute(t *testing.T) {
 	t.Run(
 		"segment table view test", func(t *testing.T) {
 			lrs := NewLRSRouteFromESRIGeoJSON(
-				"01001",
 				jsonByte,
 				0,
 				WKT,
@@ -222,7 +218,6 @@ func TestLRSRoute(t *testing.T) {
 	t.Run(
 		"linestring table view test", func(t *testing.T) {
 			lrs := NewLRSRouteFromESRIGeoJSON(
-				"01001",
 				jsonByte,
 				0,
 				WKT,
@@ -249,7 +244,6 @@ func TestLRSRoute(t *testing.T) {
 	t.Run(
 		"sink function test", func(t *testing.T) {
 			lrs := NewLRSRouteFromESRIGeoJSON(
-				"01001",
 				jsonByte,
 				0,
 				WKT,
