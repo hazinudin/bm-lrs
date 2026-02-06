@@ -75,6 +75,7 @@ func (r *LRSRouteRepository) SyncFromGeoJSON(ctx context.Context, geoJSON []byte
 		latitudeCol:  "LAT",
 		longitudeCol: "LON",
 	}
+	defer lrsBatch.Release()
 
 	for idx := range featuresCount {
 		lrsRoute := NewLRSRouteFromESRIGeoJSON(geoJSON, idx, geom.LAMBERT_WKT)
@@ -82,10 +83,6 @@ func (r *LRSRouteRepository) SyncFromGeoJSON(ctx context.Context, geoJSON []byte
 
 		lrsBatch.AddRoute(lrsRoute)
 	}
-
-	// Create LRSRoute object
-	// lrsBatch := NewLRSRouteFromESRIGeoJSON(routeID, geoJSON, featuresCount, "EPSG:4326")
-	defer lrsBatch.Release()
 
 	// 4. DuckDB Processing
 	conn, err := r.connector.Connect(ctx)
