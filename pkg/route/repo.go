@@ -84,7 +84,11 @@ func (r *LRSRouteRepository) SyncFromGeoJSON(ctx context.Context, geoJSON []byte
 		lrsBatch.AddRoute(lrsRoute)
 	}
 
-	// 4. DuckDB Processing
+	return r.mergeWithExisting(ctx, &lrsBatch, opts)
+}
+
+func (r *LRSRouteRepository) mergeWithExisting(ctx context.Context, lrsBatch *LRSRouteBatch, opts SyncOptions) error {
+	// DuckDB Processing
 	conn, err := r.connector.Connect(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get db connection: %w", err)
