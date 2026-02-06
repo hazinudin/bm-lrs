@@ -66,7 +66,7 @@ func (l *LRSRoute) setPushDown(enable bool) {
 }
 
 // Create LRSRoute from ESRI GeoJSON
-func NewLRSRouteFromESRIGeoJSON(route_id string, jsonbyte []byte, feature_idx int, crs string) LRSRoute {
+func NewLRSRouteFromESRIGeoJSON(jsonbyte []byte, feature_idx int, crs string) LRSRoute {
 	var jsonContent map[string]any
 
 	json.Unmarshal([]byte(jsonbyte), &jsonContent)
@@ -76,6 +76,7 @@ func NewLRSRouteFromESRIGeoJSON(route_id string, jsonbyte []byte, feature_idx in
 	WKT := jsonContent["spatialReference"].(map[string]any)["wkt"].(string)
 	features := jsonContent["features"].([]any)
 	feature := features[feature_idx].(map[string]any)["geometry"].(map[string]any)
+	route_id := features[feature_idx].(map[string]any)["attributes"].(map[string]any)["LINKID"].(string)
 	vertexes = feature["paths"].([]any)[0].([]any)
 
 	pool := memory.NewGoAllocator()
