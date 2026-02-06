@@ -404,7 +404,7 @@ func (r *LRSRouteRepository) FetchArcGISFeatures(ctx context.Context, token stri
 	params.Set("token", token)
 	params.Set("returnGeometry", "true")
 	params.Set("returnM", "true")
-	params.Set("returnZ", "true")
+	params.Set("returnZ", "false")
 
 	fullURL := fmt.Sprintf("%s?%s", r.featureServiceURL, params.Encode())
 
