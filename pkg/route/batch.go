@@ -175,7 +175,7 @@ func (l *LRSRouteBatch) ViewName() string {
 	}
 
 	if len(noPushDownFiles) > 0 {
-		noPushDownQuery := fmt.Sprintf(`SELECT * FROM read_parquet([%s])`, strings.Join(noPushDownFiles, ", "))
+		noPushDownQuery := fmt.Sprintf(`SELECT * FROM read_parquet(["%s"])`, strings.Join(noPushDownFiles, `", "`))
 		queries = append(queries, noPushDownQuery)
 	}
 
