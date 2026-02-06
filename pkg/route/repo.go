@@ -1,6 +1,7 @@
 package route
 
 import (
+	"bm-lrs/pkg/geom"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -54,23 +55,37 @@ func (r *LRSRouteRepository) Sync(ctx context.Context, routeIDs []string, opts S
 		return fmt.Errorf("failed to fetch arcgis features: %w", err)
 	}
 
-	// For backward compatibility or internal usage, we might still need a representative routeID
-	// but the new SyncFromGeoJSON should ideally handle the merged data.
-	// If the user wants to sync multiple routes, we can just use the first one as a key or handle it differently.
-	var representativeID string
-	if len(routeIDs) > 0 {
-		representativeID = routeIDs[0]
-	}
-
-	return r.SyncFromGeoJSON(ctx, representativeID, geoJSON, opts)
+	return r.SyncFromGeoJSON(ctx, geoJSON, opts)
 }
 
 // SyncFromGeoJSON processes GeoJSON data into Parquet files and updates the Postgres catalog.
 // This is the internal method that can be called directly for testing.
-func (r *LRSRouteRepository) SyncFromGeoJSON(ctx context.Context, routeID string, geoJSON []byte, opts SyncOptions) error {
+func (r *LRSRouteRepository) SyncFromGeoJSON(ctx context.Context, geoJSON []byte, opts SyncOptions) error {
+	var jsonContent map[string]any
+
+	err := json.Unmarshal(geoJSON, &jsonContent)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal geojson: %w", err)
+	}
+	// The total count of features included in the ESRI JSON
+	featuresCount := len(jsonContent["features"].([]any))
+
+	// Create LRSBatch
+	lrsBatch := LRSRouteBatch{
+		latitudeCol:  "LAT",
+		longitudeCol: "LON",
+	}
+
+	for idx := range featuresCount {
+		lrsRoute := NewLRSRouteFromESRIGeoJSON(geoJSON, idx, geom.LAMBERT_WKT)
+		defer lrsRoute.Release()
+
+		lrsBatch.AddRoute(lrsRoute)
+	}
+
 	// Create LRSRoute object
-	lrsRoute := NewLRSRouteFromESRIGeoJSON(routeID, geoJSON, 0, "EPSG:4326")
-	defer lrsRoute.Release()
+	// lrsBatch := NewLRSRouteFromESRIGeoJSON(routeID, geoJSON, featuresCount, "EPSG:4326")
+	defer lrsBatch.Release()
 
 	// 4. DuckDB Processing
 	conn, err := r.connector.Connect(ctx)
@@ -78,12 +93,6 @@ func (r *LRSRouteRepository) SyncFromGeoJSON(ctx context.Context, routeID string
 		return fmt.Errorf("failed to get db connection: %w", err)
 	}
 	defer conn.Close()
-
-	// Sink the record batch first
-	err = lrsRoute.Sink()
-	if err != nil {
-		return fmt.Errorf("Failed to sink the LRS object: %v", err)
-	}
 
 	// Install spatial extension
 	if _, err := r.db.ExecContext(ctx, "INSTALL spatial; LOAD spatial;"); err != nil {
@@ -136,14 +145,14 @@ func (r *LRSRouteRepository) SyncFromGeoJSON(ctx context.Context, routeID string
 	var queryPoint string
 	if hasPrev {
 		queryPoint = fmt.Sprintf(`
-			SELECT * FROM '%s' WHERE ROUTEID != '%s'
+			SELECT * FROM '%s' WHERE ROUTEID NOT IN (SELECT DISTINCT(ROUTEID) FROM %s)
 			UNION ALL
 			SELECT * FROM %s
-		`, prevPointFile, routeID, lrsRoute.ViewName())
+		`, prevPointFile, lrsBatch.ViewName(), lrsBatch.ViewName())
 	} else {
 		// First time, just current route
 		// If ViewName() returns something like (select ...), we can use it directly in COPY
-		queryPoint = lrsRoute.ViewName()
+		queryPoint = lrsBatch.ViewName()
 	}
 
 	copyPointSQL := fmt.Sprintf("COPY %s TO '%s' (FORMAT PARQUET)", queryPoint, mergedPointFile)
@@ -158,15 +167,15 @@ func (r *LRSRouteRepository) SyncFromGeoJSON(ctx context.Context, routeID string
 
 	// 2. Merge Segments
 	// Current route segment query
-	currentSegmentQuery := fmt.Sprintf(`SELECT * FROM (%s)`, lrsRoute.SegmentQuery())
+	currentSegmentQuery := fmt.Sprintf(`SELECT * FROM (%s)`, lrsBatch.SegmentQuery())
 
 	var querySegment string
 	if hasPrev && prevSegmentFile != "" {
 		querySegment = fmt.Sprintf(`
-			SELECT * FROM '%s' WHERE ROUTEID != '%s'
+			SELECT * FROM '%s' WHERE ROUTEID NOT IN (SELECT DISTINCT(ROUTEID) FROM (%s))
 			UNION ALL
 			%s
-		`, prevSegmentFile, routeID, currentSegmentQuery)
+		`, prevSegmentFile, currentSegmentQuery, currentSegmentQuery)
 	} else {
 		querySegment = currentSegmentQuery
 	}
@@ -183,15 +192,15 @@ func (r *LRSRouteRepository) SyncFromGeoJSON(ctx context.Context, routeID string
 	// 3. Merge Linestrings
 	// Current route linestring query
 	// Note: LinestringQuery returns just 'linestr'. We need to add ROUTEID.
-	currentLinestrQuery := fmt.Sprintf(`SELECT * FROM (%s)`, lrsRoute.LinestringQuery())
+	currentLinestrQuery := fmt.Sprintf(`SELECT * FROM (%s)`, lrsBatch.LinestringQuery())
 
 	var queryLinestr string
 	if hasPrev && prevLinestrFile != "" {
 		queryLinestr = fmt.Sprintf(`
-			SELECT * FROM '%s' WHERE ROUTEID != '%s'
+			SELECT * FROM '%s' WHERE ROUTEID NOT IN (SELECT DISTINCT(ROUTEID) FROM (%s))
 			UNION ALL
 			%s
-		`, prevLinestrFile, routeID, currentLinestrQuery)
+		`, prevLinestrFile, currentLinestrQuery, currentLinestrQuery)
 	} else {
 		queryLinestr = currentLinestrQuery
 	}
