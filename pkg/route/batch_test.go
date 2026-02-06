@@ -14,7 +14,7 @@ func createTestLRSRouteFromJSON(t *testing.T, routeID string, filename string) L
 
 	// Assuming CRS is available in the JSON or use a default one like geom.LAMBERT_WKT
 	// NewLRSRouteFromESRIGeoJSON handles the parsing
-	route := NewLRSRouteFromESRIGeoJSON(routeID, jsonByte, 0, geom.LAMBERT_WKT)
+	route := NewLRSRouteFromESRIGeoJSON(jsonByte, 0, geom.LAMBERT_WKT)
 	return route
 }
 
