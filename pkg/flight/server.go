@@ -1,9 +1,12 @@
 package flight
 
 import (
+	"bm-lrs/pkg/geom"
 	"bm-lrs/pkg/mvalue"
+	"bm-lrs/pkg/projection"
 	"bm-lrs/pkg/route"
 	"bm-lrs/pkg/route_event"
+	"encoding/json"
 	"fmt"
 	"io"
 
@@ -32,26 +35,51 @@ func (s *LRSFlightServer) DoExchange(stream flight.FlightService_DoExchangeServe
 		return err
 	}
 
-	// The first message might only contain metadata or descriptor
-	// If it's a DoExchange, the first message usually has the FlightDescriptor
-	// But in some implementations, it's just FlightData.
-	// Let's check for AppMetadata in the first message.
+	// Parse the operation and CRS from AppMetadata
+	var operation string
+	crs := "EPSG:4326" // Default CRS
 
-	operation := string(desc.AppMetadata)
-	if operation == "" {
-		// Try to see if it's in the descriptor
-		// For now, let's assume it's in AppMetadata of the first FlightData
+	// Define a struct for the expected JSON metadata
+	type Action struct {
+		Operation string `json:"operation"`
+		CRS       string `json:"crs"`
 	}
+
+	var action Action
+	// Try parsing as JSON first
+	if len(desc.AppMetadata) > 0 {
+		if err := json.Unmarshal(desc.AppMetadata, &action); err == nil && action.Operation != "" {
+			operation = action.Operation
+			if action.CRS != "" {
+				crs = action.CRS
+			}
+		} else {
+			// Fallback: treat the metadata as a raw string (the operation name)
+			operation = string(desc.AppMetadata)
+		}
+	} else if desc.FlightDescriptor != nil && len(desc.FlightDescriptor.Cmd) > 0 {
+		// Try parsing from Descriptor.Cmd
+		if err := json.Unmarshal(desc.FlightDescriptor.Cmd, &action); err == nil && action.Operation != "" {
+			operation = action.Operation
+			if action.CRS != "" {
+				crs = action.CRS
+			}
+		} else {
+			operation = string(desc.FlightDescriptor.Cmd)
+		}
+	}
+
+	fmt.Printf("Operation: %s, CRS: %s\n", operation, crs)
 
 	switch operation {
 	case "calculate_m_value":
-		return s.handleCalculateMValue(stream, desc)
+		return s.handleCalculateMValue(stream, desc, crs)
 	default:
 		return fmt.Errorf("unsupported operation: %s", operation)
 	}
 }
 
-func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoExchangeServer, firstData *flight.FlightData) error {
+func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoExchangeServer, firstData *flight.FlightData, crs string) error {
 	ctx := stream.Context()
 
 	// Read record batches from the stream
@@ -72,12 +100,14 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 	defer reader.Release()
 
 	// Collect all records to form an LRSEvents object
-	// Note: In a real production scenario, we might want to process batch by batch
-	// but CalculatePointsMValue currently takes all records.
 	for reader.Next() {
 		rec := reader.RecordBatch()
 		rec.Retain()
 		records = append(records, rec)
+	}
+
+	if err := reader.Err(); err != nil {
+		return err
 	}
 
 	if len(records) == 0 {
@@ -85,11 +115,25 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 	}
 
 	// Create LRSEvents
-	events, err := route_event.NewLRSEvents(records, "EPSG:4326") // Default CRS
+	events, err := route_event.NewLRSEvents(records, crs)
 	if err != nil {
-		return err
+		return fmt.Errorf("error when creating new LRSEvents: %v", err)
 	}
 	defer events.Release()
+
+	// Check the Events CRS
+	if events.GetCRS() != geom.LAMBERT_WKT {
+		transformedEvents, err := projection.Transform(events, geom.LAMBERT_WKT, false)
+		if err != nil {
+			return err
+		}
+		defer transformedEvents.Release()
+
+		events, err = route_event.NewLRSEvents(transformedEvents.GetRecords(), geom.LAMBERT_WKT)
+		if err != nil {
+			return fmt.Errorf("error creating LRSEvents after transformation: %v", err)
+		}
+	}
 
 	// Get Route IDs from events to fetch LRS data
 	routeIDs := events.GetRouteIDs()
@@ -116,12 +160,11 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 	// Stream back the results
 	// Use flight.Writer to handle the complexity of Arrow Flight data framing
 	writer := flight.NewRecordWriter(stream, ipc.WithSchema(resultEvents.GetRecords()[0].Schema()))
-	defer writer.Close()
 
 	for _, rec := range resultEvents.GetRecords() {
 		if err := writer.Write(rec); err != nil {
 			return err
 		}
 	}
-	return nil
+	return writer.Close()
 }
