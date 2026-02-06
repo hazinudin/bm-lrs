@@ -3,27 +3,34 @@ package route
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
 )
 
 type LRSRouteRepository struct {
-	connector *duckdb.Connector
-	pgConnStr string
-	db        *sql.DB
+	connector         *duckdb.Connector
+	pgConnStr         string
+	db                *sql.DB
+	tokenURL          string
+	featureServiceURL string
 }
 
 func NewLRSRouteRepository(connector *duckdb.Connector, pgConnStr string, db *sql.DB) *LRSRouteRepository {
 	return &LRSRouteRepository{
-		connector: connector,
-		pgConnStr: pgConnStr,
-		db:        db,
+		connector:         connector,
+		pgConnStr:         pgConnStr,
+		db:                db,
+		tokenURL:          "https://gisportal.binamarga.pu.go.id/portal/sharing/rest/generateToken",
+		featureServiceURL: "https://gisportal.binamarga.pu.go.id/arcgis/rest/services/Jalan/BinaMargaLRS/MapServer/0/query",
 	}
 }
 
@@ -34,25 +41,33 @@ type SyncOptions struct {
 }
 
 // Sync fetches data from ArcGIS, processes it into Parquet files, and updates the Postgres catalog.
-func (r *LRSRouteRepository) Sync(ctx context.Context, routeID string, opts SyncOptions) error {
-	// 1. Load ArcGIS URL from env
-	arcgisURL := os.Getenv("ARCGIS_FEATURE_SERVICE_URL")
-	if arcgisURL == "" {
-		return fmt.Errorf("ARCGIS_FEATURE_SERVICE_URL environment variable not set")
+func (r *LRSRouteRepository) Sync(ctx context.Context, routeIDs []string, opts SyncOptions) error {
+	// 1. Generate ArcGIS Token
+	token, err := r.GenerateArcGISToken(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to generate arcgis token: %w", err)
 	}
 
 	// 2. Fetch GeoJSON from ArcGIS
-	geoJSON, err := r.fetchArcGISData(ctx, arcgisURL, routeID)
+	geoJSON, err := r.FetchArcGISFeatures(ctx, token, routeIDs)
 	if err != nil {
-		return fmt.Errorf("failed to fetch arcgis data: %w", err)
+		return fmt.Errorf("failed to fetch arcgis features: %w", err)
 	}
 
-	return r.syncFromGeoJSON(ctx, routeID, geoJSON, opts)
+	// For backward compatibility or internal usage, we might still need a representative routeID
+	// but the new SyncFromGeoJSON should ideally handle the merged data.
+	// If the user wants to sync multiple routes, we can just use the first one as a key or handle it differently.
+	var representativeID string
+	if len(routeIDs) > 0 {
+		representativeID = routeIDs[0]
+	}
+
+	return r.SyncFromGeoJSON(ctx, representativeID, geoJSON, opts)
 }
 
-// syncFromGeoJSON processes GeoJSON data into Parquet files and updates the Postgres catalog.
+// SyncFromGeoJSON processes GeoJSON data into Parquet files and updates the Postgres catalog.
 // This is the internal method that can be called directly for testing.
-func (r *LRSRouteRepository) syncFromGeoJSON(ctx context.Context, routeID string, geoJSON []byte, opts SyncOptions) error {
+func (r *LRSRouteRepository) SyncFromGeoJSON(ctx context.Context, routeID string, geoJSON []byte, opts SyncOptions) error {
 	// Create LRSRoute object
 	lrsRoute := NewLRSRouteFromESRIGeoJSON(routeID, geoJSON, 0, "EPSG:4326")
 	defer lrsRoute.Release()
@@ -84,10 +99,10 @@ func (r *LRSRouteRepository) syncFromGeoJSON(ctx context.Context, routeID string
 		return fmt.Errorf("failed to create data dir: %w", err)
 	}
 
-	timeStamp := time.Now().Unix()
-	mergedPointFile := filepath.Join(dataDir, fmt.Sprintf("lrs_point_merged_%d.parquet", timeStamp))
-	mergedSegmentFile := filepath.Join(dataDir, fmt.Sprintf("lrs_segment_merged_%d.parquet", timeStamp))
-	mergedLinestringFile := filepath.Join(dataDir, fmt.Sprintf("lrs_linestring_merged_%d.parquet", timeStamp))
+	nanoStamp := time.Now().UnixNano()
+	mergedPointFile := filepath.Join(dataDir, fmt.Sprintf("lrs_point_merged_%d.parquet", nanoStamp))
+	mergedSegmentFile := filepath.Join(dataDir, fmt.Sprintf("lrs_segment_merged_%d.parquet", nanoStamp))
+	mergedLinestringFile := filepath.Join(dataDir, fmt.Sprintf("lrs_linestring_merged_%d.parquet", nanoStamp))
 
 	// Get latest merged files to merge with
 	latestLRS, err := r.GetLatest(ctx, "")
@@ -121,34 +136,46 @@ func (r *LRSRouteRepository) syncFromGeoJSON(ctx context.Context, routeID string
 	var queryPoint string
 	if hasPrev {
 		queryPoint = fmt.Sprintf(`
-			SELECT * FROM "%s" WHERE ROUTEID != '%s'
+			SELECT * FROM '%s' WHERE ROUTEID != '%s'
 			UNION ALL
-			SELECT *, FROM %s
+			SELECT * FROM %s
 		`, prevPointFile, routeID, lrsRoute.ViewName())
 	} else {
 		// First time, just current route
+		// If ViewName() returns something like (select ...), we can use it directly in COPY
 		queryPoint = lrsRoute.ViewName()
 	}
-	_, err = r.db.ExecContext(ctx, fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET);", queryPoint, mergedPointFile))
+
+	copyPointSQL := fmt.Sprintf("COPY %s TO '%s' (FORMAT PARQUET)", queryPoint, mergedPointFile)
+	if !strings.HasPrefix(strings.TrimSpace(queryPoint), "(") {
+		copyPointSQL = fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET)", queryPoint, mergedPointFile)
+	}
+
+	_, err = r.db.ExecContext(ctx, copyPointSQL)
 	if err != nil {
 		return fmt.Errorf("failed to export merged point parquet: %w", err)
 	}
 
 	// 2. Merge Segments
 	// Current route segment query
-	currentSegmentQuery := fmt.Sprintf(`SELECT *, FROM (%s)`, lrsRoute.SegmentQuery())
+	currentSegmentQuery := fmt.Sprintf(`SELECT * FROM (%s)`, lrsRoute.SegmentQuery())
 
 	var querySegment string
 	if hasPrev && prevSegmentFile != "" {
 		querySegment = fmt.Sprintf(`
-			SELECT * FROM "%s" WHERE ROUTEID != '%s'
+			SELECT * FROM '%s' WHERE ROUTEID != '%s'
 			UNION ALL
 			%s
 		`, prevSegmentFile, routeID, currentSegmentQuery)
 	} else {
 		querySegment = currentSegmentQuery
 	}
-	_, err = r.db.ExecContext(ctx, fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET);", querySegment, mergedSegmentFile))
+	copySegmentSQL := fmt.Sprintf("COPY %s TO '%s' (FORMAT PARQUET)", querySegment, mergedSegmentFile)
+	if !strings.HasPrefix(strings.TrimSpace(querySegment), "(") {
+		copySegmentSQL = fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET)", querySegment, mergedSegmentFile)
+	}
+
+	_, err = r.db.ExecContext(ctx, copySegmentSQL)
 	if err != nil {
 		return fmt.Errorf("failed to export merged segment parquet: %w", err)
 	}
@@ -156,12 +183,12 @@ func (r *LRSRouteRepository) syncFromGeoJSON(ctx context.Context, routeID string
 	// 3. Merge Linestrings
 	// Current route linestring query
 	// Note: LinestringQuery returns just 'linestr'. We need to add ROUTEID.
-	currentLinestrQuery := fmt.Sprintf(`SELECT *, FROM (%s)`, lrsRoute.LinestringQuery())
+	currentLinestrQuery := fmt.Sprintf(`SELECT * FROM (%s)`, lrsRoute.LinestringQuery())
 
 	var queryLinestr string
 	if hasPrev && prevLinestrFile != "" {
 		queryLinestr = fmt.Sprintf(`
-			SELECT * FROM "%s" WHERE ROUTEID != '%s'
+			SELECT * FROM '%s' WHERE ROUTEID != '%s'
 			UNION ALL
 			%s
 		`, prevLinestrFile, routeID, currentLinestrQuery)
@@ -169,7 +196,12 @@ func (r *LRSRouteRepository) syncFromGeoJSON(ctx context.Context, routeID string
 		queryLinestr = currentLinestrQuery
 	}
 
-	_, err = r.db.ExecContext(ctx, fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET);", queryLinestr, mergedLinestringFile))
+	copyLinestrSQL := fmt.Sprintf("COPY %s TO '%s' (FORMAT PARQUET)", queryLinestr, mergedLinestringFile)
+	if !strings.HasPrefix(strings.TrimSpace(queryLinestr), "(") {
+		copyLinestrSQL = fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET)", queryLinestr, mergedLinestringFile)
+	}
+
+	_, err = r.db.ExecContext(ctx, copyLinestrSQL)
 	if err != nil {
 		return fmt.Errorf("failed to export merged linestring parquet: %w", err)
 	}
@@ -289,23 +321,89 @@ func (r *LRSRouteRepository) GetLatest(ctx context.Context, routeID string) (*LR
 	return out, nil
 }
 
-// fetchArcGISData fetches GeoJSON data from ArcGIS Feature Service
-func (r *LRSRouteRepository) fetchArcGISData(ctx context.Context, baseURL string, routeID string) ([]byte, error) {
-	// Construct query URL
-	url := fmt.Sprintf("%s/query?where=RouteId='%s'&outFields=*&f=geojson", baseURL, routeID)
+// GenerateArcGISToken generates a token for ArcGIS Portal
+func (r *LRSRouteRepository) GenerateArcGISToken(ctx context.Context) (string, error) {
+	username := os.Getenv("ARCGIS_USER")
+	password := os.Getenv("ARCGIS_PASSWORD")
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	data := url.Values{}
+	data.Set("username", username)
+	data.Set("password", password)
+	data.Set("f", "json")
+	data.Set("expiration", "60")
+	// data.Set("client", "requestip")
+	data.Set("client", "referer")
+	data.Set("referer", "https://sipdjn.binamarga.pu.go.id/")
+
+	req, err := http.NewRequestWithContext(ctx, "POST", r.tokenURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("token request failed with status: %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Token string `json:"token"`
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+
+	if result.Error != nil {
+		return "", fmt.Errorf("arcgis error: %s (code %d)", result.Error.Message, result.Error.Code)
+	}
+
+	return result.Token, nil
+}
+
+// FetchArcGISFeatures fetches GeoJSON features for the given route IDs
+func (r *LRSRouteRepository) FetchArcGISFeatures(ctx context.Context, token string, routeIDs []string) ([]byte, error) {
+	// Construct WHERE clause: RouteId IN ('id1', 'id2', ...)
+	var where string
+	if len(routeIDs) == 1 {
+		where = fmt.Sprintf("RouteId='%s'", routeIDs[0])
+	} else if len(routeIDs) > 1 {
+		quotedIDs := make([]string, len(routeIDs))
+		for i, id := range routeIDs {
+			quotedIDs[i] = fmt.Sprintf("'%s'", id)
+		}
+		where = fmt.Sprintf("RouteId IN (%s)", strings.Join(quotedIDs, ","))
+	} else {
+		where = "1=1"
+	}
+
+	params := url.Values{}
+	params.Set("where", where)
+	params.Set("outfields", "LINKID,LINK_NAME,SK_LENGTH") // Including necessary fields for LRSRoute
+	params.Set("f", "json")
+	params.Set("token", token)
+	params.Set("returnGeometry", "true")
+	params.Set("returnM", "true")
+	params.Set("returnZ", "true")
+
+	fullURL := fmt.Sprintf("%s?%s", r.featureServiceURL, params.Encode())
+
+	req, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	// Add authentication if needed from env
-	token := os.Getenv("ARCGIS_TOKEN")
-	if token != "" {
-		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
-	}
-
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -313,7 +411,7 @@ func (r *LRSRouteRepository) fetchArcGISData(ctx context.Context, baseURL string
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("arcgis request failed with status: %d", resp.StatusCode)
+		return nil, fmt.Errorf("feature request failed with status: %d", resp.StatusCode)
 	}
 
 	return io.ReadAll(resp.Body)
