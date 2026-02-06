@@ -261,26 +261,32 @@ func (e *LRSEvents) GetRouteIDs() []string {
 		}
 		colIdx := indices[0]
 		col := batch.Column(colIdx)
-		strCol, ok := col.(*array.String)
-		if !ok {
-			// Try as binary if not string
-			binCol, ok := col.(*array.Binary)
-			if !ok {
-				continue
-			}
-			for i := 0; i < binCol.Len(); i++ {
-				if binCol.IsNull(i) {
-					continue
+
+		switch c := col.(type) {
+		case *array.String:
+			for i := 0; i < c.Len(); i++ {
+				if !c.IsNull(i) {
+					routeIDs[c.Value(i)] = struct{}{}
 				}
-				routeIDs[string(binCol.Value(i))] = struct{}{}
 			}
-			continue
-		}
-		for i := 0; i < strCol.Len(); i++ {
-			if strCol.IsNull(i) {
-				continue
+		case *array.LargeString:
+			for i := 0; i < c.Len(); i++ {
+				if !c.IsNull(i) {
+					routeIDs[c.Value(i)] = struct{}{}
+				}
 			}
-			routeIDs[strCol.Value(i)] = struct{}{}
+		case *array.Binary:
+			for i := 0; i < c.Len(); i++ {
+				if !c.IsNull(i) {
+					routeIDs[string(c.Value(i))] = struct{}{}
+				}
+			}
+		case *array.LargeBinary:
+			for i := 0; i < c.Len(); i++ {
+				if !c.IsNull(i) {
+					routeIDs[string(c.Value(i))] = struct{}{}
+				}
+			}
 		}
 	}
 
