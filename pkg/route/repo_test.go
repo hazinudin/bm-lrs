@@ -5,13 +5,16 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"os"
-	"testing"
-
 	"log"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
 
 	"github.com/duckdb/duckdb-go/v2"
 	"github.com/joho/godotenv"
+	"github.com/stretchr/testify/assert"
 )
 
 var testPgConnStr string
@@ -39,6 +42,15 @@ func TestSyncFromGeoJSON(t *testing.T) {
 	// Open DB for SQL operation
 	db := sql.OpenDB(connector)
 	defer db.Close()
+
+	// Cleanup any stale catalog entries from previous/other runs
+	// This prevents IO Errors when merging with deleted temp files.
+	ctx := context.Background()
+	_, _ = db.ExecContext(ctx, "install postgres; load postgres;")
+	_, err = db.ExecContext(ctx, fmt.Sprintf("ATTACH IF NOT EXISTS '%s' AS postgres_db (TYPE POSTGRES)", testPgConnStr))
+	if err == nil {
+		_, _ = db.ExecContext(ctx, "DELETE FROM postgres_db.lrs_catalogs")
+	}
 
 	// Create temp directory for output files
 	tempDir, err := os.MkdirTemp("", "lrs_test_*")
@@ -73,7 +85,7 @@ func TestSyncFromGeoJSON(t *testing.T) {
 		repo := NewLRSRouteRepository(connector, testPgConnStr, db)
 
 		// sync
-		err := repo.syncFromGeoJSON(ctx, routeID, jsonBytes, SyncOptions{Author: "SYSTEM", CommitMsg: "TEST"})
+		err := repo.SyncFromGeoJSON(ctx, routeID, jsonBytes, SyncOptions{Author: "SYSTEM", CommitMsg: "TEST"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -93,7 +105,7 @@ func TestSyncFromGeoJSON(t *testing.T) {
 		t.Run("sync second route and merge", func(t *testing.T) {
 			routeID2 := "01002"
 			// Sync same json but as different route
-			err := repo.syncFromGeoJSON(ctx, routeID2, jsonBytes, SyncOptions{Author: "SYSTEM", CommitMsg: "TEST2"})
+			err := repo.SyncFromGeoJSON(ctx, routeID2, jsonBytes, SyncOptions{Author: "SYSTEM", CommitMsg: "TEST2"})
 			if err != nil {
 				t.Fatalf("Failed to sync second route: %v", err)
 			}
@@ -194,4 +206,126 @@ func TestNewLRSRouteRepository(t *testing.T) {
 	if repo.pgConnStr != testPgConnStr {
 		t.Error("Repository pgConnStr not set correctly")
 	}
+}
+func TestGenerateArcGISToken(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("Expected POST request, got %s", r.Method)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if r.FormValue("username") != "subditadps" {
+			t.Errorf("Expected username subditadps, got %s", r.FormValue("username"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"token": "test-token-123", "expires": 123456789}`)
+	}))
+	defer ts.Close()
+
+	repo := &LRSRouteRepository{
+		tokenURL: ts.URL,
+	}
+
+	token, err := repo.GenerateArcGISToken(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to generate token: %v", err)
+	}
+
+	if token != "test-token-123" {
+		t.Errorf("Expected token test-token-123, got %s", token)
+	}
+}
+
+func TestFetchArcGISFeatures(t *testing.T) {
+	repo := &LRSRouteRepository{}
+	repo.tokenURL = "https://gisportal.binamarga.pu.go.id/portal/sharing/rest/generateToken"
+	repo.featureServiceURL = "https://gisportal.binamarga.pu.go.id/arcgis/rest/services/Jalan/BinaMargaLRS/MapServer/0/query"
+
+	token, err := repo.GenerateArcGISToken(context.Background())
+	if err != nil {
+		t.Errorf("failed to generate access token: %v", err)
+	}
+	t.Logf("generated token: %s", token)
+
+	data, err := repo.FetchArcGISFeatures(context.Background(), token, []string{"01001", "01002"})
+	if err == nil {
+		os.WriteFile("testdata/arcgis_fetched_debug.json", data, 0644)
+	}
+
+	dataStr := string(data)
+	assert.NotNil(t, dataStr)
+
+	if err != nil {
+		t.Fatalf("Failed to fetch features: %v", err)
+	}
+
+	if !strings.Contains(string(data), "esriGeometryPolyline") {
+		t.Errorf("Expected FeatureCollection in response, got %s", string(data))
+	}
+}
+func TestSync(t *testing.T) {
+	// Setup DuckDB
+	connector, err := duckdb.NewConnector("", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connector.Close()
+	db := sql.OpenDB(connector)
+	defer db.Close()
+
+	// Initial cleanup
+	ctx := context.Background()
+	_, _ = db.ExecContext(ctx, "install postgres; load postgres;")
+	_, _ = db.ExecContext(ctx, fmt.Sprintf("ATTACH IF NOT EXISTS '%s' AS postgres_db (TYPE POSTGRES)", testPgConnStr))
+	_, _ = db.ExecContext(ctx, "DELETE FROM postgres_db.lrs_catalogs")
+
+	// Mock ArcGIS Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/generateToken", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"token": "mock-token"}`)
+	})
+	mux.HandleFunc("/query", func(w http.ResponseWriter, r *http.Request) {
+		// Read local test data
+		jsonByte, _ := os.ReadFile("testdata/lrs_01001.json")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(jsonByte)
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Temp dir
+	tempDir, _ := os.MkdirTemp("", "sync_test_*")
+	defer os.RemoveAll(tempDir)
+	os.Setenv("LRS_DATA_DIR", tempDir)
+	defer os.Unsetenv("LRS_DATA_DIR")
+
+	repo := NewLRSRouteRepository(connector, testPgConnStr, db)
+
+	ctx = context.Background()
+	err = repo.Sync(ctx, []string{"01001"}, SyncOptions{Author: "TESTER", CommitMsg: "MOCK SYNC"})
+	if err != nil {
+		t.Fatalf("Sync failed: %v", err)
+	}
+
+	// Verify catalog exists and has entry
+	_, err = db.ExecContext(ctx, "install postgres; load postgres;")
+	_, err = db.ExecContext(ctx, fmt.Sprintf("ATTACH IF NOT EXISTS '%s' AS postgres_db (TYPE POSTGRES)", testPgConnStr))
+	if err != nil {
+		t.Fatalf("Failed to attach postgres: %v", err)
+	}
+
+	var version int
+	err = db.QueryRowContext(ctx, "SELECT VERSION FROM postgres_db.lrs_catalogs WHERE AUTHOR = 'TESTER'").Scan(&version)
+	if err != nil {
+		t.Fatalf("Failed to verify catalog entry: %v", err)
+	}
+
+	if version != 1 {
+		t.Errorf("Expected version 1, got %d", version)
+	}
+
+	// Cleanup
+	db.ExecContext(ctx, "DELETE FROM postgres_db.lrs_catalogs WHERE AUTHOR = 'TESTER'")
 }
