@@ -290,21 +290,6 @@ func TestSync(t *testing.T) {
 	_, _ = db.ExecContext(ctx, fmt.Sprintf("ATTACH IF NOT EXISTS '%s' AS postgres_db (TYPE POSTGRES)", testPgConnStr))
 	_, _ = db.ExecContext(ctx, "DELETE FROM postgres_db.lrs_catalogs")
 
-	// Mock ArcGIS Server
-	mux := http.NewServeMux()
-	mux.HandleFunc("/generateToken", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"token": "mock-token"}`)
-	})
-	mux.HandleFunc("/query", func(w http.ResponseWriter, r *http.Request) {
-		// Read local test data
-		jsonByte, _ := os.ReadFile("testdata/lrs_01001.json")
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(jsonByte)
-	})
-	ts := httptest.NewServer(mux)
-	defer ts.Close()
-
 	// Temp dir
 	tempDir, _ := os.MkdirTemp("", "sync_test_*")
 	defer os.RemoveAll(tempDir)
