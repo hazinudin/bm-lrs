@@ -7,6 +7,7 @@ require (
 	github.com/duckdb/duckdb-go/v2 v2.5.0
 	github.com/joho/godotenv v1.5.1
 	github.com/stretchr/testify v1.11.0
+	google.golang.org/grpc v1.75.0
 )
 
 require (
@@ -46,7 +47,6 @@ require (
 	golang.org/x/tools v0.40.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250707201910-8d1bb00bc6a7 // indirect
-	google.golang.org/grpc v1.75.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
