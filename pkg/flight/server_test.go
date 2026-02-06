@@ -129,7 +129,7 @@ func TestDoExchange(t *testing.T) {
 
 	// Send operation metadata in first message
 	err = stream.Send(&flight.FlightData{
-		AppMetadata: []byte("calculate_m_value"),
+		AppMetadata: []byte(`{"operation": "calculate_m_value", "crs": "EPSG:4326"}`),
 	})
 	require.NoError(t, err)
 
