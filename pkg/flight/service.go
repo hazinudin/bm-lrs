@@ -3,6 +3,7 @@ package flight
 import (
 	"bm-lrs/pkg/route"
 	"fmt"
+	"log"
 
 	"github.com/apache/arrow-go/v18/arrow/flight"
 	"google.golang.org/grpc"
@@ -18,7 +19,7 @@ func NewFlightServer(repo *route.LRSRouteRepository) flight.Server {
 func StartFlightServer(repo *route.LRSRouteRepository, port int) error {
 	addr := fmt.Sprintf(":%d", port)
 	server := NewFlightServer(repo)
-	fmt.Printf("Starting LRS Flight server on %s...\n", addr)
+	log.Printf("Starting LRS Flight server on %s...\n", addr)
 	if err := server.Init(addr); err != nil {
 		return err
 	}
@@ -32,7 +33,7 @@ func StartFlightServerWithGRPC(repo *route.LRSRouteRepository, port int, opts ..
 	lrsServer := NewLRSFlightServer(repo)
 	server.RegisterFlightService(lrsServer)
 
-	fmt.Printf("Starting LRS Flight server on %s...\n", addr)
+	log.Printf("Starting LRS Flight server on %s...\n", addr)
 	if err := server.Init(addr); err != nil {
 		return err
 	}
