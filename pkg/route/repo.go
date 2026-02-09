@@ -384,11 +384,11 @@ func (r *LRSRouteRepository) GenerateArcGISToken(ctx context.Context) (string, e
 }
 
 // FetchArcGISFeatures fetches GeoJSON features for the given route IDs
-func (r *LRSRouteRepository) FetchArcGISFeatures(ctx context.Context, token string, routeIDs []string) ([]byte, error) {
+func (r *LRSRouteRepository) FetchArcGISFeatures(ctx context.Context, token string, routeIDs []string, count_only bool, pagination *ResultPagination) ([]byte, error) {
 	// Construct WHERE clause: RouteId IN ('id1', 'id2', ...)
 	var where string
 	if len(routeIDs) == 1 {
-		where = fmt.Sprintf("RouteId='%s'", routeIDs[0])
+		where = fmt.Sprintf("RouteId='%s' AND TODATE IS NULL AND (FROMDATE < CURRENT_TIMESTAMP OR FROMDATE IS NULL)", routeIDs[0])
 	} else if len(routeIDs) > 1 {
 		quotedIDs := make([]string, len(routeIDs))
 		for i, id := range routeIDs {
@@ -407,6 +407,25 @@ func (r *LRSRouteRepository) FetchArcGISFeatures(ctx context.Context, token stri
 	params.Set("returnGeometry", "true")
 	params.Set("returnM", "true")
 	params.Set("returnZ", "false")
+
+	if count_only {
+		params.Set("returnCountOnly", "true")
+	} else {
+		params.Set("returnCountOnly", "false")
+	}
+
+	// Pagination options
+	if pagination == nil {
+		params.Set("resultOffset", strconv.Itoa(0))
+		params.Set("resultRecordCount", strconv.Itoa(r.arcgisFetchLimit))
+	} else {
+		if pagination.ReturnCount > r.arcgisFetchLimit {
+			return nil, fmt.Errorf("pagination return count exceeds the fetch limit.")
+		}
+
+		params.Set("resultOffset", strconv.Itoa(pagination.Offset))
+		params.Set("resultRecordCount", strconv.Itoa(pagination.ReturnCount))
+	}
 
 	fullURL := fmt.Sprintf("%s?%s", r.featureServiceURL, params.Encode())
 
