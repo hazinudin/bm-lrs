@@ -263,7 +263,6 @@ func (l *LRSRoute) Sink() error {
 	if err != nil {
 		return fmt.Errorf("Failed to create temporary directory: %v", err)
 	}
-	l.temp_dir = tempDir
 
 	filePath := filepath.Join(tempDir, fmt.Sprintf("temp_%s.parquet", l.route_id))
 
@@ -300,7 +299,12 @@ func (l *LRSRoute) Sink() error {
 	if l.source_files == nil {
 		l.source_files = &sourceFiles{}
 	}
+
+	// Release the RecordBatch buffer before setting the temp_dir attribute
+	l.Release()
+
 	l.source_files.Point = &filePath
+	l.temp_dir = tempDir
 
 	return nil
 }
