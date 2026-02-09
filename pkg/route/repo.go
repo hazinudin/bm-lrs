@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -124,7 +125,7 @@ func (r *LRSRouteRepository) Sync(ctx context.Context, routeIDs []string, opts S
 	}
 
 	// 2. Fetch GeoJSON from ArcGIS
-	geoJSON, err := r.FetchArcGISFeatures(ctx, token, routeIDs)
+	geoJSON, err := r.FetchArcGISFeatures(ctx, token, routeIDs, false, nil)
 	if err != nil {
 		return fmt.Errorf("failed to fetch arcgis features: %w", err)
 	}

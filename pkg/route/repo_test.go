@@ -249,6 +249,7 @@ func TestGenerateArcGISToken(t *testing.T) {
 
 func TestFetchArcGISFeatures(t *testing.T) {
 	repo := &LRSRouteRepository{}
+	repo.arcgisFetchLimit = 250
 	repo.tokenURL = "https://gisportal.binamarga.pu.go.id/portal/sharing/rest/generateToken"
 	repo.featureServiceURL = "https://gisportal.binamarga.pu.go.id/arcgis/rest/services/Jalan/BinaMargaLRS/MapServer/0/query"
 
@@ -258,7 +259,7 @@ func TestFetchArcGISFeatures(t *testing.T) {
 	}
 	t.Logf("generated token: %s", token)
 
-	data, err := repo.FetchArcGISFeatures(context.Background(), token, []string{"01001", "01002"})
+	data, err := repo.FetchArcGISFeatures(context.Background(), token, []string{"01001", "01002"}, false, nil)
 	if err == nil {
 		os.WriteFile("testdata/arcgis_fetched_debug.json", data, 0644)
 	}
