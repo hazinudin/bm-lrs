@@ -160,11 +160,13 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 	// Stream back the results
 	// Use flight.Writer to handle the complexity of Arrow Flight data framing
 	writer := flight.NewRecordWriter(stream, ipc.WithSchema(resultEvents.GetRecords()[0].Schema()))
+	defer writer.Close()
 
 	for _, rec := range resultEvents.GetRecords() {
 		if err := writer.Write(rec); err != nil {
 			return err
 		}
 	}
-	return writer.Close()
+
+	return nil
 }
