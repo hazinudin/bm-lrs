@@ -1,15 +1,18 @@
 import json
+import os
+import sys
+
+import pandas as pd
+import polars as pl
 import pyarrow as pa
 import pyarrow.flight as flight
 import pyarrow.parquet as pq
-import sys
-import os
-import polars as pl
+
 
 def main():
     # Define server location
     location = "grpc://127.0.0.1:50051"
-    
+
     # Input file path
     input_file = "client/testdata/lambert_15010.parquet"
     if not os.path.exists(input_file):
@@ -33,43 +36,68 @@ def main():
         # TO_STA_LONG -> LON
         # Add ROUTEID column (assuming 15010 from filename)
         route_id = "15010"
-        
+
         # Create a new table with required columns
         data = table.to_pandas()
-        data['LAT'] = data['TO_STA_LAT']
-        data['LON'] = data['TO_STA_LONG']
-        data['ROUTEID'] = route_id
-        
+        data["LAT"] = data["TO_STA_LAT"]
+        data["LON"] = data["TO_STA_LONG"]
+        data["ROUTEID"] = route_id
+
         # Keep only the columns the server expects or keep all but ensure these exist
         # The server validates ROUTEID, LAT, LON
-        final_table = pa.Table.from_pandas(data[['ROUTEID', 'LAT', 'LON']])
+        final_table = pa.Table.from_pandas(data[["ROUTEID", "LAT", "LON"]])
         print(f"Prepared table with columns: {final_table.column_names}")
 
         # Prepare metadata for DoExchange
-        action = {
-            "operation": "calculate_m_value",
-            "crs": lambert_wkt
-        }
-        descriptor = flight.FlightDescriptor.for_command(json.dumps(action).encode('utf-8'))
-        
+        action = {"operation": "calculate_m_value", "crs": lambert_wkt}
+        descriptor = flight.FlightDescriptor.for_command(
+            json.dumps(action).encode("utf-8")
+        )
+
         # Start DoExchange
         options = flight.FlightCallOptions()
         writer, reader = client.do_exchange(descriptor, options=options)
 
-        # In PyArrow, we can write a batch with app_metadata if needed, 
+        # In PyArrow, we can write a batch with app_metadata if needed,
         # but here we use the descriptor for the command.
-        
+
         # Construct a RecordBatch from the table.
         batches = final_table.to_batches()
-        
+
         # Begin the stream
         writer.begin(final_table.schema)
-        
+
         # Write data
         print("Sending data to server...")
         for batch in batches:
             writer.write(batch)
-            
+
+        # Half-close the stream (send side)
+        writer.done_writing()
+        print("Closed client write-side. Reading results...")
+
+        # Test read all
+        print(reader.read_pandas())
+        writer.close()
+
+        # Start DoExchange
+        options = flight.FlightCallOptions()
+        writer, reader = client.do_exchange(descriptor, options=options)
+
+        # In PyArrow, we can write a batch with app_metadata if needed,
+        # but here we use the descriptor for the command.
+
+        # Construct a RecordBatch from the table.
+        batches = final_table.to_batches()
+
+        # Begin the stream
+        writer.begin(final_table.schema)
+
+        # Write data
+        print("Sending data to server...")
+        for batch in batches:
+            writer.write(batch)
+
         # Half-close the stream (send side)
         writer.done_writing()
         print("Closed client write-side. Reading results...")
@@ -95,23 +123,27 @@ def main():
 
         result_table = pa.Table.from_batches(batches_in)
         print(f"Received total results: {result_table.num_rows} rows")
-        
+
         # Print specific columns
-        df = result_table.to_pandas()
-        if 'MVAL' in df.columns:
+        df: pd.DataFrame = result_table.to_pandas()
+        pl_df = pl.from_pandas(df)
+
+        if "MVAL" in pl_df.columns:
             print("\nResults (MVAL, dist_to_line):")
-            print(df[['MVAL', 'dist_to_line']].head())
+            print(df[["MVAL", "dist_to_line"]].head())
         else:
             print("\nResults columns:", df.columns)
             print(df.head())
 
     except Exception as e:
         print(f"\nAn error occurred: {type(e).__name__}: {e}")
-        if hasattr(e, 'extra_info'):
+        if hasattr(e, "extra_info"):
             print(f"Extra info: {e.extra_info}")
         # Print traceback for debugging
         import traceback
+
         traceback.print_exc()
+
 
 if __name__ == "__main__":
     main()
