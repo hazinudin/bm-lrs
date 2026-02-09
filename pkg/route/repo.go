@@ -23,6 +23,7 @@ type LRSRouteRepository struct {
 	db                *sql.DB
 	tokenURL          string
 	featureServiceURL string
+	arcgisFetchLimit  int
 }
 
 func NewLRSRouteRepository(connector *duckdb.Connector, pgConnStr string, db *sql.DB) *LRSRouteRepository {
@@ -32,6 +33,7 @@ func NewLRSRouteRepository(connector *duckdb.Connector, pgConnStr string, db *sq
 		db:                db,
 		tokenURL:          "https://gisportal.binamarga.pu.go.id/portal/sharing/rest/generateToken",
 		featureServiceURL: "https://gisportal.binamarga.pu.go.id/arcgis/rest/services/Jalan/BinaMargaLRS/MapServer/0/query",
+		arcgisFetchLimit:  250, // Feature query limit
 	}
 }
 
