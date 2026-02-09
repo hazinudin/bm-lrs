@@ -43,6 +43,78 @@ type SyncOptions struct {
 	CommitMsg string
 }
 
+type ResultPagination struct {
+	Offset      int
+	ReturnCount int
+}
+
+// SyncAll fetches all data from ArcGIS, process it into Parquet files, and updates the Postgres catalog.
+func (r *LRSRouteRepository) SyncAll(ctx context.Context, opts SyncOptions) error {
+	token, err := r.GenerateArcGISToken(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to generate arcgis token: %w", err)
+	}
+
+	emptySelection := []string{}
+	countJSON, err := r.FetchArcGISFeatures(ctx, token, emptySelection, true, nil)
+	if err != nil {
+		return fmt.Errorf("failed to fetch count of the features: %w", err)
+	}
+
+	var countResult struct {
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal(countJSON, &countResult); err != nil {
+		return fmt.Errorf("failed to unmarshal count response: %w", err)
+	}
+
+	featureCount := countResult.Count
+
+	// Create LRSBatch
+	lrsBatch := LRSRouteBatch{
+		latitudeCol:  "LAT",
+		longitudeCol: "LON",
+	}
+	defer lrsBatch.Release()
+
+	// Fetch the features from API by chunks
+	for offset := 0; offset < featureCount; offset += r.arcgisFetchLimit {
+		pagination := ResultPagination{
+			Offset:      offset,
+			ReturnCount: r.arcgisFetchLimit,
+		}
+
+		geoJSON, err := r.FetchArcGISFeatures(ctx, token, emptySelection, false, &pagination)
+		if err != nil {
+			return fmt.Errorf("failed to fetch features at offset %d: %w", offset, err)
+		}
+
+		var jsonFeatureCount int
+		if (offset + r.arcgisFetchLimit) <= featureCount {
+			jsonFeatureCount = offset + r.arcgisFetchLimit
+		} else {
+			jsonFeatureCount = featureCount - offset
+		}
+
+		for idx := range jsonFeatureCount {
+			lrsRoute := NewLRSRouteFromESRIGeoJSON(geoJSON, idx, geom.LAMBERT_WKT)
+			defer lrsRoute.Release()
+
+			err = lrsBatch.AddRoute(lrsRoute)
+			if err != nil {
+				return fmt.Errorf("failed to add route the LRSBatch: %v", err)
+			}
+		}
+	}
+
+	err = r.mergeWithExisting(ctx, &lrsBatch, SyncOptions{Author: "SYSTEM", CommitMsg: "SYNC ALL"})
+	if err != nil {
+		return fmt.Errorf("error when merging with current parquet files: %v", err)
+	}
+
+	return nil
+}
+
 // Sync fetches data from ArcGIS, processes it into Parquet files, and updates the Postgres catalog.
 func (r *LRSRouteRepository) Sync(ctx context.Context, routeIDs []string, opts SyncOptions) error {
 	// 1. Generate ArcGIS Token
