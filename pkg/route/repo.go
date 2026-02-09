@@ -394,9 +394,9 @@ func (r *LRSRouteRepository) FetchArcGISFeatures(ctx context.Context, token stri
 		for i, id := range routeIDs {
 			quotedIDs[i] = fmt.Sprintf("'%s'", id)
 		}
-		where = fmt.Sprintf("RouteId IN (%s)", strings.Join(quotedIDs, ","))
+		where = fmt.Sprintf("RouteId IN (%s) AND TODATE IS NULL AND (FROMDATE < CURRENT_TIMESTAMP OR FROMDATE IS NULL)", strings.Join(quotedIDs, ","))
 	} else {
-		where = "1=1"
+		where = "1=1 AND TODATE IS NULL AND (FROMDATE < CURRENT_TIMESTAMP OR FROMDATE IS NULL)"
 	}
 
 	params := url.Values{}
