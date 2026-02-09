@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bm-lrs/pkg/api"
 	"bm-lrs/pkg/flight"
 	"bm-lrs/pkg/route"
 	"database/sql"
@@ -39,9 +40,18 @@ func main() {
 	// Repository setup
 	repo := route.NewLRSRouteRepository(connector, pgConnStr, db)
 
+	// Start REST API server in goroutine
+	restPort := 8080
+	apiServer := api.NewAPIServer(repo, restPort)
+	go func() {
+		if err := apiServer.Start(); err != nil {
+			log.Printf("REST API server error: %v", err)
+		}
+	}()
+
 	// Start Flight server
-	port := 50051
-	if err := flight.StartFlightServer(repo, port); err != nil {
+	flightPort := 50051
+	if err := flight.StartFlightServer(repo, flightPort); err != nil {
 		log.Fatal("Flight server failed:", err)
 	}
 }
