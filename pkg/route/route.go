@@ -380,7 +380,7 @@ func (l *LRSRoute) LinestringQuery() string {
 			"MvalCol":      l.mValueCol,
 			"ViewName":     l.ViewName(),
 			"VertexSeqCol": l.VertexSeqColumn,
-			"RouteID":      l.GetRouteID(),
+			"RouteID":      fmt.Sprintf("'%s'", l.GetRouteID()),
 		}
 
 		templ, err := template.New("queryTemplate").Parse(query)
