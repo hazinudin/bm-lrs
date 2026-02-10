@@ -328,6 +328,28 @@ func (r *LRSRouteRepository) mergeWithExisting(ctx context.Context, lrsBatch *LR
 	}
 
 	// 2. Merge Segments
+	if len(lrsBatch.routes) >= 1000 {
+		tempMaterializeDir, err := os.MkdirTemp("", "lrs_materialize_segment_*")
+		if err != nil {
+			return fmt.Errorf("failed to create temp materialize dir: %w", err)
+		}
+		defer os.RemoveAll(tempMaterializeDir)
+
+		for i := range lrsBatch.sourceFiles.Segment {
+			sf := &lrsBatch.sourceFiles.Segment[i]
+			if !sf.materialized {
+				tempFileName := filepath.Join(tempMaterializeDir, fmt.Sprintf("lrs_segment_temp_%d_%d.parquet", nanoStamp, i))
+				copySQL := fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET)", sf.filePath, tempFileName)
+				if _, err := r.db.ExecContext(ctx, copySQL); err != nil {
+					return fmt.Errorf("failed to materialize segment query for route %d: %w", i, err)
+				}
+				sf.filePath = tempFileName
+				sf.materialized = true
+				sf.routes = []string{}
+			}
+		}
+	}
+
 	// Current route segment query
 	currentSegmentQuery := fmt.Sprintf(`SELECT * FROM (%s)`, lrsBatch.SegmentQuery())
 
@@ -352,6 +374,28 @@ func (r *LRSRouteRepository) mergeWithExisting(ctx context.Context, lrsBatch *LR
 	}
 
 	// 3. Merge Linestrings
+	if len(lrsBatch.routes) >= 1000 {
+		tempMaterializeDir, err := os.MkdirTemp("", "lrs_materialize_linestring_*")
+		if err != nil {
+			return fmt.Errorf("failed to create temp materialize dir: %w", err)
+		}
+		defer os.RemoveAll(tempMaterializeDir)
+
+		for i := range lrsBatch.sourceFiles.LineString {
+			sf := &lrsBatch.sourceFiles.LineString[i]
+			if !sf.materialized {
+				tempFileName := filepath.Join(tempMaterializeDir, fmt.Sprintf("lrs_linestring_temp_%d_%d.parquet", nanoStamp, i))
+				copySQL := fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET)", sf.filePath, tempFileName)
+				if _, err := r.db.ExecContext(ctx, copySQL); err != nil {
+					return fmt.Errorf("failed to materialize linestring query for route %d: %w", i, err)
+				}
+				sf.filePath = tempFileName
+				sf.materialized = true
+				sf.routes = []string{}
+			}
+		}
+	}
+
 	// Current route linestring query
 	// Note: LinestringQuery returns just 'linestr'. We need to add ROUTEID.
 	currentLinestrQuery := fmt.Sprintf(`SELECT * FROM (%s)`, lrsBatch.LinestringQuery())
