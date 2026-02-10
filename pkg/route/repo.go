@@ -115,7 +115,7 @@ func (r *LRSRouteRepository) SyncAll(ctx context.Context, opts SyncOptions) erro
 						}
 						return
 					}
-					log.Printf("done fethcing offset: %d", offset)
+					log.Printf("done fetching offset: %d", offset)
 
 					var itemsInChunk int
 					if (offset + r.arcgisFetchLimit) <= featureCount {
