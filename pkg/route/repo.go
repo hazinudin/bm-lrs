@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
@@ -79,36 +81,117 @@ func (r *LRSRouteRepository) SyncAll(ctx context.Context, opts SyncOptions) erro
 	defer lrsBatch.Release()
 
 	// Fetch the features from API by chunks
-	for offset := 0; offset < featureCount; offset += r.arcgisFetchLimit {
-		pagination := ResultPagination{
-			Offset:      offset,
-			ReturnCount: r.arcgisFetchLimit,
-		}
+	// Fetch the features from API by chunks
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	jobs := make(chan int)
+	errChan := make(chan error, 4)
+	abort := make(chan struct{})
+	var once sync.Once
 
-		geoJSON, err := r.FetchArcGISFeatures(ctx, token, emptySelection, false, &pagination)
-		if err != nil {
-			return fmt.Errorf("failed to fetch features at offset %d: %w", offset, err)
-		}
+	// Worker pool with 4 workers
+	for w := 0; w < 4; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case offset, ok := <-jobs:
+					if !ok {
+						return
+					}
 
-		var jsonFeatureCount int
-		if (offset + r.arcgisFetchLimit) <= featureCount {
-			jsonFeatureCount = offset + r.arcgisFetchLimit
-		} else {
-			jsonFeatureCount = featureCount - offset
-		}
+					// Work
+					pagination := ResultPagination{
+						Offset:      offset,
+						ReturnCount: r.arcgisFetchLimit,
+					}
 
-		for idx := range jsonFeatureCount {
-			lrsRoute := NewLRSRouteFromESRIGeoJSON(geoJSON, idx, geom.LAMBERT_WKT)
-			defer lrsRoute.Release()
+					geoJSON, err := r.FetchArcGISFeatures(ctx, token, emptySelection, false, &pagination)
+					if err != nil {
+						select {
+						case errChan <- fmt.Errorf("failed to fetch features at offset %d: %w", offset, err):
+							once.Do(func() { close(abort) })
+						default:
+						}
+						return
+					}
+					log.Printf("done fethcing offset: %d", offset)
 
-			err = lrsBatch.AddRoute(lrsRoute)
-			if err != nil {
-				return fmt.Errorf("failed to add route the LRSBatch: %v", err)
+					var itemsInChunk int
+					if (offset + r.arcgisFetchLimit) <= featureCount {
+						itemsInChunk = r.arcgisFetchLimit
+					} else {
+						itemsInChunk = featureCount - offset
+					}
+
+					for idx := 0; idx < itemsInChunk; idx++ {
+						lrsRoute, err := NewLRSRouteFromESRIGeoJSON(geoJSON, idx, geom.LAMBERT_WKT)
+						if err != nil {
+							select {
+							case errChan <- fmt.Errorf("failed to parse route at index %d: %v", idx, err):
+								once.Do(func() { close(abort) })
+							default:
+							}
+							return
+						}
+						// Ensure release happens after processing in worker
+						// Using defer alone inside loop accumulates, so use func closure or explicit Release
+						func() {
+							defer lrsRoute.Release()
+
+							mu.Lock()
+							err = lrsBatch.AddRoute(lrsRoute)
+							mu.Unlock()
+						}()
+
+						if err != nil {
+							select {
+							case errChan <- fmt.Errorf("failed to add route the LRSBatch: %v", err):
+								once.Do(func() { close(abort) })
+							default:
+							}
+							return
+						}
+					}
+
+				case <-abort:
+					return
+				case <-ctx.Done():
+					log.Printf("Done exit in fetch")
+					return
+				}
 			}
-		}
+		}()
 	}
 
-	err = r.mergeWithExisting(ctx, &lrsBatch, SyncOptions{Author: "SYSTEM", CommitMsg: "SYNC ALL"})
+	// Dispatch jobs
+	go func() {
+		defer close(jobs)
+		for offset := 0; offset < featureCount; offset += r.arcgisFetchLimit {
+			select {
+			case jobs <- offset:
+			case <-abort:
+				return
+			case <-ctx.Done():
+				log.Printf("Done exit in dispatcher")
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
+
+	// Check if any error occurred
+	select {
+	case err := <-errChan:
+		return err
+	default:
+	}
+
+	log.Printf("%v", lrsBatch.sourceFiles.LineString)
+
+	err = r.mergeWithExisting(ctx, &lrsBatch, opts)
 	if err != nil {
 		return fmt.Errorf("error when merging with current parquet files: %v", err)
 	}
@@ -153,7 +236,10 @@ func (r *LRSRouteRepository) SyncFromGeoJSON(ctx context.Context, geoJSON []byte
 	defer lrsBatch.Release()
 
 	for idx := range featuresCount {
-		lrsRoute := NewLRSRouteFromESRIGeoJSON(geoJSON, idx, geom.LAMBERT_WKT)
+		lrsRoute, err := NewLRSRouteFromESRIGeoJSON(geoJSON, idx, geom.LAMBERT_WKT)
+		if err != nil {
+			return fmt.Errorf("failed to parse route at index %d: %w", idx, err)
+		}
 		defer lrsRoute.Release()
 
 		lrsBatch.AddRoute(lrsRoute)
@@ -461,15 +547,15 @@ func (r *LRSRouteRepository) FetchArcGISFeatures(ctx context.Context, token stri
 	// Construct WHERE clause: RouteId IN ('id1', 'id2', ...)
 	var where string
 	if len(routeIDs) == 1 {
-		where = fmt.Sprintf("RouteId='%s' AND TODATE IS NULL AND (FROMDATE < CURRENT_TIMESTAMP OR FROMDATE IS NULL)", routeIDs[0])
+		where = fmt.Sprintf("RouteId='%s' AND TODATE IS NULL AND (FROMDATE < CURRENT_TIMESTAMP OR FROMDATE IS NULL) AND ROAD_STATUS='N'", routeIDs[0])
 	} else if len(routeIDs) > 1 {
 		quotedIDs := make([]string, len(routeIDs))
 		for i, id := range routeIDs {
 			quotedIDs[i] = fmt.Sprintf("'%s'", id)
 		}
-		where = fmt.Sprintf("RouteId IN (%s) AND TODATE IS NULL AND (FROMDATE < CURRENT_TIMESTAMP OR FROMDATE IS NULL)", strings.Join(quotedIDs, ","))
+		where = fmt.Sprintf("RouteId IN (%s) AND TODATE IS NULL AND (FROMDATE < CURRENT_TIMESTAMP OR FROMDATE IS NULL) AND ROAD_STATUS='N'", strings.Join(quotedIDs, ","))
 	} else {
-		where = "1=1 AND TODATE IS NULL AND (FROMDATE < CURRENT_TIMESTAMP OR FROMDATE IS NULL)"
+		where = "1=1 AND TODATE IS NULL AND (FROMDATE < CURRENT_TIMESTAMP OR FROMDATE IS NULL) AND ROAD_STATUS='N'"
 	}
 
 	params := url.Values{}
