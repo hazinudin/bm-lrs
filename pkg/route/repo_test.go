@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -324,5 +325,133 @@ func TestSync(t *testing.T) {
 
 	// Cleanup
 	db.ExecContext(ctx, "DELETE FROM postgres_db.lrs_catalogs WHERE AUTHOR = 'TESTER'")
+	db.ExecContext(ctx, "DROP TABLE IF EXISTS postgres_db.lrs_routes")
+}
+
+func TestSyncAll(t *testing.T) {
+	// Setup DuckDB
+	connector, err := duckdb.NewConnector("", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connector.Close()
+	db := sql.OpenDB(connector)
+	defer db.Close()
+
+	// Initial cleanup
+	ctx := context.Background()
+	_, _ = db.ExecContext(ctx, "install postgres; load postgres;")
+	_, _ = db.ExecContext(ctx, fmt.Sprintf("ATTACH IF NOT EXISTS '%s' AS postgres_db (TYPE POSTGRES)", testPgConnStr))
+	_, _ = db.ExecContext(ctx, "DELETE FROM postgres_db.lrs_catalogs")
+
+	// Temp dir
+	tempDir, _ := os.MkdirTemp("", "sync_all_test_*")
+	defer os.RemoveAll(tempDir)
+	os.Setenv("LRS_DATA_DIR", tempDir)
+	defer os.Unsetenv("LRS_DATA_DIR")
+
+	// Mock server for ArcGIS
+	featureCount := 500 // simulate 500 features
+	limit := 250        // mock limit same as default
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Handle token generation
+		if strings.Contains(r.URL.Path, "generateToken") {
+			fmt.Fprint(w, `{"token": "mock-token", "expires": 123456789}`)
+			return
+		}
+
+		// Handle feature query (count only)
+		if r.URL.Query().Get("returnCountOnly") == "true" {
+			fmt.Fprintf(w, `{"count": %d}`, featureCount)
+			return
+		}
+
+		// Handle feature query (data)
+		// We expect pagination params: resultOffset and resultRecordCount
+		offsetStr := r.URL.Query().Get("resultOffset")
+		countStr := r.URL.Query().Get("resultRecordCount")
+
+		offset, _ := strconv.Atoi(offsetStr)
+		count, _ := strconv.Atoi(countStr)
+		if count == 0 {
+			count = limit
+		}
+
+		// Generate mock features
+		features := []string{}
+
+		// Use a template for a simple feature
+		featureTpl := `{
+			"attributes": {
+				"OBJECTID": %d,
+				"RouteId": "R%d",
+				"LINKID": "L%d", 
+				"LINK_NAME": "Link %d",
+				"SK_LENGTH": 100.0,
+				"LAT": 0.0,
+				"LON": 0.0,
+				"MVAL": 0.0,
+				"VERTEX_SEQ": 0
+			},
+			"geometry": {
+				"paths": [
+					[
+						[110.0, -7.0, 0, 0],
+						[110.1, -7.1, 10, 1]
+					]
+				]
+			}
+		}`
+
+		end := offset + count
+		if end > featureCount {
+			end = featureCount
+		}
+
+		for i := offset; i < end; i++ {
+			features = append(features, fmt.Sprintf(featureTpl, i, i, i, i))
+		}
+
+		responseTpl := `{
+			"spatialReference": {"wkt": "GEOGCS[\"GCS_WGS_1984\",DATUM[\"D_WGS_1984\",SPHEROID[\"WGS_1984\",6378137.0,298.257223563]],PRIMEM[\"Greenwich\",0.0],UNIT[\"Degree\",0.0174532925199433]]"},
+			"features": [%s]
+		}`
+		fmt.Fprintf(w, responseTpl, strings.Join(features, ","))
+	}))
+	defer mockServer.Close()
+
+	repo := NewLRSRouteRepository(connector, testPgConnStr, db)
+	// Override URLs to point to mock server
+	repo.tokenURL = mockServer.URL + "/generateToken"
+	repo.featureServiceURL = mockServer.URL + "/query"
+	repo.arcgisFetchLimit = limit
+
+	ctx = context.Background()
+	err = repo.SyncAll(ctx, SyncOptions{Author: "TESTER_ALL", CommitMsg: "MOCK SYNC ALL"})
+	if err != nil {
+		t.Fatalf("SyncAll failed: %v", err)
+	}
+
+	// Verify catalog exists and has entry
+	_, err = db.ExecContext(ctx, "install postgres; load postgres;")
+	_, err = db.ExecContext(ctx, fmt.Sprintf("ATTACH IF NOT EXISTS '%s' AS postgres_db (TYPE POSTGRES)", testPgConnStr))
+	if err != nil {
+		t.Fatalf("Failed to attach postgres: %v", err)
+	}
+
+	var version int
+	err = db.QueryRowContext(ctx, "SELECT VERSION FROM postgres_db.lrs_catalogs WHERE AUTHOR = 'TESTER_ALL'").Scan(&version)
+	if err != nil {
+		t.Fatalf("Failed to verify catalog entry: %v", err)
+	}
+
+	if version != 1 {
+		t.Errorf("Expected version 1, got %d", version)
+	}
+
+	// Cleanup
+	db.ExecContext(ctx, "DELETE FROM postgres_db.lrs_catalogs WHERE AUTHOR = 'TESTER_ALL'")
 	db.ExecContext(ctx, "DROP TABLE IF EXISTS postgres_db.lrs_routes")
 }
