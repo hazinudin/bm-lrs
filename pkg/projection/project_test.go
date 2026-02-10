@@ -111,11 +111,14 @@ func TestTransform(t *testing.T) {
 
 			jsonByte, _ := io.ReadAll(jsonFile)
 
-			lrs := route.NewLRSRouteFromESRIGeoJSON(
+			lrs, err := route.NewLRSRouteFromESRIGeoJSON(
 				jsonByte,
 				0,
 				lambert_wkt,
 			)
+			if err != nil {
+				t.Fatal(err)
+			}
 			defer lrs.Release()
 
 			new_lrs, err := Transform(&lrs, "EPSG:4326", true)

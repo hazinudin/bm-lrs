@@ -131,22 +131,28 @@ func TestLRSRoute(t *testing.T) {
 
 	t.Run(
 		"initialize from geojson", func(t *testing.T) {
-			lrs := NewLRSRouteFromESRIGeoJSON(
+			lrs, err := NewLRSRouteFromESRIGeoJSON(
 				jsonByte,
 				0,
 				WKT,
 			)
+			if err != nil {
+				t.Fatalf("NewLRSRouteFromESRIGeoJSON failed: %v", err)
+			}
 			defer lrs.Release()
 		},
 	)
 
 	t.Run(
 		"geometry type test", func(t *testing.T) {
-			lrs := NewLRSRouteFromESRIGeoJSON(
+			lrs, err := NewLRSRouteFromESRIGeoJSON(
 				jsonByte,
 				0,
 				WKT,
 			)
+			if err != nil {
+				t.Fatalf("NewLRSRouteFromESRIGeoJSON failed: %v", err)
+			}
 			defer lrs.Release()
 
 			if lrs.GetGeometryType() != geom.LRS {
@@ -157,11 +163,14 @@ func TestLRSRoute(t *testing.T) {
 
 	t.Run(
 		"point table view test", func(t *testing.T) {
-			lrs := NewLRSRouteFromESRIGeoJSON(
+			lrs, err := NewLRSRouteFromESRIGeoJSON(
 				jsonByte,
 				0,
 				WKT,
 			)
+			if err != nil {
+				t.Fatalf("NewLRSRouteFromESRIGeoJSON failed: %v", err)
+			}
 			defer lrs.Release()
 
 			rr, err := array.NewRecordReader(lrs.GetRecords()[0].Schema(), lrs.GetRecords())
@@ -182,11 +191,14 @@ func TestLRSRoute(t *testing.T) {
 
 	t.Run(
 		"segment table view test", func(t *testing.T) {
-			lrs := NewLRSRouteFromESRIGeoJSON(
+			lrs, err := NewLRSRouteFromESRIGeoJSON(
 				jsonByte,
 				0,
 				WKT,
 			)
+			if err != nil {
+				t.Fatalf("NewLRSRouteFromESRIGeoJSON failed: %v", err)
+			}
 			defer lrs.Release()
 
 			rr, err := array.NewRecordReader(lrs.GetRecords()[0].Schema(), lrs.GetRecords())
@@ -217,11 +229,14 @@ func TestLRSRoute(t *testing.T) {
 
 	t.Run(
 		"linestring table view test", func(t *testing.T) {
-			lrs := NewLRSRouteFromESRIGeoJSON(
+			lrs, err := NewLRSRouteFromESRIGeoJSON(
 				jsonByte,
 				0,
 				WKT,
 			)
+			if err != nil {
+				t.Fatalf("NewLRSRouteFromESRIGeoJSON failed: %v", err)
+			}
 			defer lrs.Release()
 
 			rr, err := array.NewRecordReader(lrs.GetRecords()[0].Schema(), lrs.GetRecords())
@@ -243,11 +258,14 @@ func TestLRSRoute(t *testing.T) {
 
 	t.Run(
 		"sink function test", func(t *testing.T) {
-			lrs := NewLRSRouteFromESRIGeoJSON(
+			lrs, err := NewLRSRouteFromESRIGeoJSON(
 				jsonByte,
 				0,
 				WKT,
 			)
+			if err != nil {
+				t.Fatalf("NewLRSRouteFromESRIGeoJSON failed: %v", err)
+			}
 			defer lrs.Release()
 
 			lrs.Sink()
