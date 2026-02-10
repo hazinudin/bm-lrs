@@ -199,12 +199,16 @@ func (l *LRSRouteBatch) SegmentQuery() string {
 				queries = append(queries, fmt.Sprintf(`SELECT * FROM "%s" WHERE ROUTEID IN ['%s']`, sf.filePath, routeList))
 			}
 		} else {
-			queries = append(queries, sf.filePath)
+			queries = append(queries, sf.filePath) // No materialization means query from the Point parquet
 		}
 	}
 
 	if len(noPushDownFiles) > 0 {
-		noPushDownQuery := fmt.Sprintf(`SELECT * FROM read_parquet([%s])`, strings.Join(noPushDownFiles, ", "))
+		noPushDownFilesQuoted := make([]string, len(noPushDownFiles))
+		for i, f := range noPushDownFiles {
+			noPushDownFilesQuoted[i] = fmt.Sprintf("'%s'", f)
+		}
+		noPushDownQuery := fmt.Sprintf(`SELECT * FROM read_parquet([%s])`, strings.Join(noPushDownFilesQuoted, ", "))
 		queries = append(queries, noPushDownQuery)
 	}
 
@@ -233,7 +237,11 @@ func (l *LRSRouteBatch) LinestringQuery() string {
 	}
 
 	if len(noPushDownFiles) > 0 {
-		noPushDownQuery := fmt.Sprintf(`SELECT * FROM read_parquet([%s])`, strings.Join(noPushDownFiles, ", "))
+		noPushDownFilesQuoted := make([]string, len(noPushDownFiles))
+		for i, f := range noPushDownFiles {
+			noPushDownFilesQuoted[i] = fmt.Sprintf("'%s'", f)
+		}
+		noPushDownQuery := fmt.Sprintf(`SELECT * FROM read_parquet([%s])`, strings.Join(noPushDownFilesQuoted, ", "))
 		queries = append(queries, noPushDownQuery)
 	}
 
