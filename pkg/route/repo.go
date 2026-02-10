@@ -81,7 +81,6 @@ func (r *LRSRouteRepository) SyncAll(ctx context.Context, opts SyncOptions) erro
 	defer lrsBatch.Release()
 
 	// Fetch the features from API by chunks
-	// Fetch the features from API by chunks
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	jobs := make(chan int)
