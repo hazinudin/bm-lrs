@@ -53,6 +53,7 @@ func NewLRSRoute(route_id string, recs []arrow.RecordBatch, crs string) LRSRoute
 		mValueCol:       "MVAL",
 		VertexSeqColumn: "VERTEX_SEQ",
 		crs:             crs,
+		push_down:       false,
 	}
 
 	return out
