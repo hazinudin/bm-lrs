@@ -1,0 +1,48 @@
+# ---- Build Stage ----
+FROM golang:1.25-bookworm AS builder
+
+# Ensure we're building for the right target architecture
+ARG TARGETARCH
+WORKDIR /app
+
+# Copy dependency manifests first for better layer caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy the rest of the source code
+COPY . .
+
+# Build with CGO enabled (required by DuckDB) and the duckdb_arrow tag
+# We use standard glibc linking for performance
+RUN CGO_ENABLED=1 GOARCH=$TARGETARCH go build -tags duckdb_arrow -o /app/lrs-server ./cmd/lrs-server
+
+# ---- Runtime Stage ----
+# Use Ubuntu for the best glibc performance and hardware optimization
+FROM ubuntu:24.04
+
+# Install essential libraries and jemalloc (highly recommended for DuckDB performance)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl3 \
+    libjemalloc2 && \
+    rm -rf /var/lib/apt/lists/*
+
+# Optimize memory allocation for DuckDB with jemalloc
+ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
+# For ARM instances, the path might differ. We'll add a symlink or check.
+RUN if [ ! -f "$LD_PRELOAD" ]; then export LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libjemalloc.so.2; fi
+
+WORKDIR /app
+
+# Copy the compiled binary from the builder
+COPY --from=builder /app/lrs-server .
+
+# Data directory for parquet files
+ENV LRS_DATA_DIR=/data
+VOLUME ["/data"]
+
+# REST API + Arrow Flight ports
+EXPOSE 8080 50051
+
+ENTRYPOINT ["./lrs-server"]
