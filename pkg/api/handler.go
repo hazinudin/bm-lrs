@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"time"
 )
 
 // APIHandler handles REST API requests for M-Value calculation
@@ -55,12 +57,15 @@ func (h *APIHandler) CalculateMValueHandler(w http.ResponseWriter, r *http.Reque
 		crs = "EPSG:4326"
 	}
 
+	start := time.Now()
 	// Validate GeoJSON structure
 	if err := h.validateGeoJSON(body); err != nil {
 		h.sendError(w, http.StatusBadRequest, fmt.Sprintf("invalid GeoJSON: %v", err))
 		return
 	}
+	log.Printf("json validation: %f", time.Since(start).Seconds())
 
+	start = time.Now()
 	// Create LRSEvents from GeoJSON
 	events, err := route_event.NewLRSEventsFromGeoJSON(body, crs)
 	if err != nil {
@@ -68,8 +73,10 @@ func (h *APIHandler) CalculateMValueHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	defer events.Release()
+	log.Printf("json serialization: %f", time.Since(start).Seconds())
 
 	// Transform to Lambert CRS if needed
+	start = time.Now()
 	var processedEvents *route_event.LRSEvents
 	if events.GetCRS() != geom.LAMBERT_WKT {
 		transformedGeom, err := projection.Transform(events, geom.LAMBERT_WKT, false)
@@ -87,6 +94,7 @@ func (h *APIHandler) CalculateMValueHandler(w http.ResponseWriter, r *http.Reque
 	} else {
 		processedEvents = events
 	}
+	log.Printf("event projection: %f", time.Since(start).Seconds())
 
 	// Get Route IDs from events
 	routeIDs := processedEvents.GetRouteIDs()
@@ -96,6 +104,7 @@ func (h *APIHandler) CalculateMValueHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	// For now, process the first route (could be extended to handle multiple routes)
+	start = time.Now()
 	routeID := routeIDs[0]
 	lrs, err := h.repo.GetLatest(r.Context(), routeID)
 	if err != nil {
@@ -103,21 +112,26 @@ func (h *APIHandler) CalculateMValueHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	defer lrs.Release()
+	log.Printf("fetching catalog: %f", time.Since(start).Seconds())
 
 	// Calculate M-Values
+	start = time.Now()
 	resultEvents, err := mvalue.CalculatePointsMValue(r.Context(), lrs, *processedEvents)
 	if err != nil {
 		h.sendError(w, http.StatusInternalServerError, fmt.Sprintf("failed to calculate m-values: %v", err))
 		return
 	}
 	defer resultEvents.Release()
+	log.Printf("calculating m-value and distance to lrs: %f", time.Since(start).Seconds())
 
 	// Convert result to GeoJSON
+	start = time.Now()
 	geojsonBytes, err := resultEvents.ToGeoJSON()
 	if err != nil {
 		h.sendError(w, http.StatusInternalServerError, fmt.Sprintf("failed to serialize result to GeoJSON: %v", err))
 		return
 	}
+	log.Printf("serializing back event to geojson: %f", time.Since(start).Seconds())
 
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
