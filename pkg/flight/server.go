@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/flight"
@@ -82,16 +83,6 @@ func (s *LRSFlightServer) DoExchange(stream flight.FlightService_DoExchangeServe
 func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoExchangeServer, firstData *flight.FlightData, crs string) error {
 	ctx := stream.Context()
 
-	// Read record batches from the stream
-	var records []arrow.RecordBatch
-
-	// If the first message had data, process it
-	if len(firstData.DataBody) > 0 {
-		// We need to use a flight.Reader to parse the data
-		// This is a bit tricky since we are already in the middle of a stream
-		// Usually, we use flight.NewRecordReader(stream) but that consumes the stream
-	}
-
 	// Implementation note: Arrow Flight RecordReader is usually the way to go
 	reader, err := flight.NewRecordReader(stream)
 	if err != nil {
@@ -99,27 +90,92 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 	}
 	defer reader.Release()
 
-	// Collect all records to form an LRSEvents object
+	// Create batch handler for large record batches
+	handler, err := NewParquetBatchHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create batch handler: %v", err)
+	}
+	defer handler.Cleanup()
+
+	// Process records and write to parquet files if size exceeds 1GB
+	var records []arrow.RecordBatch
+	var totalSize int64
+	const maxBatchSize = 1000 * 1000 // 1 million rows
+
 	for reader.Next() {
 		rec := reader.RecordBatch()
 		rec.Retain()
 		records = append(records, rec)
+
+		log.Printf("Received record batch with size of %d", rec.NumRows())
+
+		// Calculate size of this record batch (approximate by row count)
+		totalSize += rec.NumRows()
+
+		// If total size exceeds 1GB, write to parquet and reset
+		if totalSize >= maxBatchSize {
+			log.Printf("Total size of records (%d rows) exceeds threshold, writing to parquet", totalSize)
+
+			// Write current records to parquet file
+			for _, r := range records {
+				if err := handler.AddRecordBatch(r); err != nil {
+					return fmt.Errorf("failed to write record batch to parquet: %v", err)
+				}
+			}
+			// Release current records and reset
+			for _, r := range records {
+				r.Release()
+			}
+			records = nil
+			totalSize = 0
+		}
 	}
 
 	if err := reader.Err(); err != nil {
 		return err
 	}
 
-	if len(records) == 0 {
-		return fmt.Errorf("no records received")
-	}
+	var events *route_event.LRSEvents
+	var err2 error
 
-	// Create LRSEvents
-	events, err := route_event.NewLRSEvents(records, crs)
-	if err != nil {
-		return fmt.Errorf("error when creating new LRSEvents: %v", err)
+	// If we wrote parquet files, merge them and create LRSEvents from file
+	if len(handler.currentFiles) > 0 {
+		// Write any remaining records to parquet
+		for _, r := range records {
+			if err := handler.AddRecordBatch(r); err != nil {
+				return fmt.Errorf("failed to write remaining record batch to parquet: %v", err)
+			}
+		}
+		// Release remaining records
+		for _, r := range records {
+			r.Release()
+		}
+		records = nil
+
+		// Merge all parquet files
+		mergedPath, err := handler.MergeParquetFiles()
+		if err != nil {
+			return fmt.Errorf("failed to merge parquet files: %v", err)
+		}
+
+		// Create LRSEvents from merged parquet file
+		events, err2 = route_event.NewLRSEventsFromFile(mergedPath, crs)
+		if err2 != nil {
+			return fmt.Errorf("error when creating LRSEvents from file: %v", err2)
+		}
+	} else {
+		// No parquet files created, use records directly
+		if len(records) == 0 {
+			return fmt.Errorf("no records received")
+		}
+
+		// Create LRSEvents from records
+		events, err2 = route_event.NewLRSEvents(records, crs)
+		if err2 != nil {
+			return fmt.Errorf("error when creating new LRSEvents: %v", err2)
+		}
+		defer events.Release()
 	}
-	defer events.Release()
 
 	// Check the Events CRS
 	if events.GetCRS() != geom.LAMBERT_WKT {
