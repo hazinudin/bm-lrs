@@ -47,26 +47,41 @@ func CalculatePointsMValue(ctx context.Context, lrs route.LRSRouteInterface, poi
 		return nil, fmt.Errorf("failed to load spatial extension: %v", err)
 	}
 
-	// Register Points as view
-	pointsRecords := points.GetRecords()
-	if len(pointsRecords) == 0 {
-		return nil, fmt.Errorf("points records are empty")
-	}
+	// Register Points
+	// Only register records if LRSEvents is not materialized (IsMaterialized is false)
+	// If LRSEvents is already materialized, register a table view referring to the parquet file
+	if points.IsMaterialized() {
+		// LRSEvents is already materialized - use the parquet file directly
+		sourceFile := points.GetSourceFile()
+		if sourceFile == nil {
+			return nil, fmt.Errorf("LRSEvents is materialized but no source file is available")
+		}
 
-	pointsReader, err := array.NewRecordReader(pointsRecords[0].Schema(), pointsRecords)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create points record reader: %v", err)
-	}
-	defer pointsReader.Release()
+		if _, err := ar.QueryContext(ctx, fmt.Sprintf("CREATE TEMP TABLE points_table AS SELECT *, row_number() OVER () as point_id FROM read_parquet('%s')", *sourceFile)); err != nil {
+			return nil, fmt.Errorf("failed to create points table from parquet file: %v", err)
+		}
+	} else {
+		// LRSEvents is not materialized - register records as a view
+		pointsRecords := points.GetRecords()
+		if len(pointsRecords) == 0 {
+			return nil, fmt.Errorf("points records are empty")
+		}
 
-	releasePoints, err := ar.RegisterView(pointsReader, "points_raw_view")
-	if err != nil {
-		return nil, fmt.Errorf("failed to register points view: %v", err)
-	}
-	defer releasePoints()
+		pointsReader, err := array.NewRecordReader(pointsRecords[0].Schema(), pointsRecords)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create points record reader: %v", err)
+		}
+		defer pointsReader.Release()
 
-	if _, err := ar.QueryContext(ctx, "CREATE TEMP TABLE points_table AS SELECT *, row_number() OVER () as point_id FROM points_raw_view"); err != nil {
-		return nil, fmt.Errorf("failed to create points table view: %v", err)
+		releasePoints, err := ar.RegisterView(pointsReader, "points_raw_view")
+		if err != nil {
+			return nil, fmt.Errorf("failed to register points view: %v", err)
+		}
+		defer releasePoints()
+
+		if _, err := ar.QueryContext(ctx, "CREATE TEMP TABLE points_table AS SELECT *, row_number() OVER () as point_id FROM points_raw_view"); err != nil {
+			return nil, fmt.Errorf("failed to create points table view: %v", err)
+		}
 	}
 
 	// Create view for LRS line and segments
@@ -80,10 +95,33 @@ func CalculatePointsMValue(ctx context.Context, lrs route.LRSRouteInterface, poi
 
 	// Check if MVAL column exists in input to decide on EXCLUDE
 	hasMVAL := false
-	for _, f := range pointsRecords[0].Schema().Fields() {
-		if f.Name == points.MValueColumn() {
-			hasMVAL = true
-			break
+	if !points.IsMaterialized() {
+		// When not materialized, we can check the schema directly from records
+		pointsRecords := points.GetRecords()
+		if len(pointsRecords) > 0 {
+			for _, f := range pointsRecords[0].Schema().Fields() {
+				if f.Name == points.MValueColumn() {
+					hasMVAL = true
+					break
+				}
+			}
+		}
+	} else {
+		// When materialized, query the parquet schema from the temporary table
+		sourceFile := points.GetSourceFile()
+		if sourceFile != nil {
+			columns, err := ar.QueryContext(ctx, fmt.Sprintf("DESCRIBE SELECT * FROM read_parquet('%s') LIMIT 0", *sourceFile))
+			if err == nil {
+				defer columns.Release()
+				for columns.Next() {
+					rec := columns.RecordBatch()
+					colNames := rec.ColumnName(0)
+					if colNames == points.MValueColumn() {
+						hasMVAL = true
+						break
+					}
+				}
+			}
 		}
 	}
 
