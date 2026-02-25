@@ -38,7 +38,7 @@ func NewLRSEvents(records []arrow.RecordBatch, crs string) (*LRSEvents, error) {
 		distToLRSCol: "DIST_TO_LRS",
 		records:      records,
 		crs:          crs,
-		materialized: true,
+		materialized: false,
 	}
 
 	if len(records) > 0 {
