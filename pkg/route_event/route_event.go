@@ -25,6 +25,8 @@ type LRSEvents struct {
 	crs          string
 	tempDir      string
 	sourceFile   *string
+	// Flag to indicate if records are in memory or only stored in file
+	materialized bool
 }
 
 func NewLRSEvents(records []arrow.RecordBatch, crs string) (*LRSEvents, error) {
@@ -36,6 +38,7 @@ func NewLRSEvents(records []arrow.RecordBatch, crs string) (*LRSEvents, error) {
 		distToLRSCol: "DIST_TO_LRS",
 		records:      records,
 		crs:          crs,
+		materialized: true,
 	}
 
 	if len(records) > 0 {
@@ -75,7 +78,7 @@ func NewLRSEventsFromGeoJSON(data []byte, crs string) (*LRSEvents, error) {
 				Type        string    `json:"type"`
 				Coordinates []float64 `json:"coordinates"`
 			} `json:"geometry"`
-			Properties map[string]interface{} `json:"properties"`
+			Properties map[string]any `json:"properties"`
 		} `json:"features"`
 	}
 
@@ -171,6 +174,11 @@ func (e *LRSEvents) GetRecords() []arrow.RecordBatch {
 	return e.records
 }
 
+// IsMaterialized returns true if the events are stored in memory, false if only in file
+func (e *LRSEvents) IsMaterialized() bool {
+	return e.materialized
+}
+
 // GetGeometryType returns the geometry type (POINTS)
 func (e *LRSEvents) GetGeometryType() geom.GeometryType {
 	return geom.POINTS
@@ -231,7 +239,37 @@ func (e *LRSEvents) Sink() error {
 
 	e.sourceFile = &filePath
 
+	// Release the RecordBatch buffer to free memory
+	e.Release()
+	e.materialized = true
+
 	return nil
+}
+
+// NewLRSEventsFromFile creates LRSEvents from a parquet file path
+// The records are NOT eagerly loaded; the file path is stored and records remain nil
+// until Materialize() is called
+func NewLRSEventsFromFile(filePath string, crs string) (*LRSEvents, error) {
+	// Validate the file exists and is readable by reading just the schema
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open parquet file: %v", err)
+	}
+	defer f.Close()
+
+	out := &LRSEvents{
+		routeIDCol:   "ROUTEID",
+		latCol:       "LAT",
+		lonCol:       "LON",
+		mValCol:      "MVAL",
+		distToLRSCol: "DIST_TO_LRS",
+		records:      nil, // Not loaded yet
+		crs:          crs,
+		sourceFile:   &filePath,
+		materialized: true,
+	}
+
+	return out, nil
 }
 
 // GetSourceFile returns the path to the parquet file if materialized
