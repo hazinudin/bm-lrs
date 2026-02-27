@@ -258,24 +258,45 @@ func (e *LRSEvents) Sink() error {
 
 // NewLRSEventsFromFile creates LRSEvents from a parquet file path
 // The records are NOT eagerly loaded; the file path is stored and records remain nil
-// until Materialize() is called
+// until LoadToBuffer() is called
+// Column names are detected from the file schema
 func NewLRSEventsFromFile(filePath string, crs string) (*LRSEvents, error) {
-	// Validate the file exists and is readable by reading just the schema
-	f, err := os.Open(filePath)
+	// Open the parquet file to read its schema
+	pf, err := file.OpenParquetFile(filePath, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open parquet file: %v", err)
 	}
-	defer f.Close()
+	defer pf.Close()
+
+	reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{}, memory.NewGoAllocator())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create arrow reader: %v", err)
+	}
+
+	schema, err := reader.Schema()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read schema: %v", err)
+	}
+
+	// Detect column names from schema with common aliases
+	routeIDCol := detectColumn(schema, []string{"ROUTEID", "LINKID", "route_id", "id"})
+	latCol := detectColumn(schema, []string{"LAT", "TO_STA_LAT", "latitude", "lat"})
+	lonCol := detectColumn(schema, []string{"LON", "TO_STA_LONG", "longitude", "lon"})
+	mValCol := detectColumn(schema, []string{"MVAL", "MVAL", "m", "m_value"})
+	distToLRSCol := detectColumn(schema, []string{"DIST_TO_LRS", "dist_to_lrs", "distance"})
+
+	// Make a copy of the file path on the heap
+	filePathCopy := filePath
 
 	out := &LRSEvents{
-		routeIDCol:   "ROUTEID",
-		latCol:       "LAT",
-		lonCol:       "LON",
-		mValCol:      "MVAL",
-		distToLRSCol: "DIST_TO_LRS",
+		routeIDCol:   routeIDCol,
+		latCol:       latCol,
+		lonCol:       lonCol,
+		mValCol:      mValCol,
+		distToLRSCol: distToLRSCol,
 		records:      nil, // Not loaded yet
 		crs:          crs,
-		sourceFile:   &filePath,
+		sourceFile:   &filePathCopy,
 		materialized: true,
 	}
 
