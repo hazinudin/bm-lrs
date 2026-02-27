@@ -229,18 +229,28 @@ func (e *LRSEvents) Sink() error {
 	if err != nil {
 		return fmt.Errorf("failed to create parquet writer: %v", err)
 	}
-	defer writer.Close()
 
 	for _, rec := range e.records {
 		if err := writer.WriteBuffered(rec); err != nil {
+			writer.Close()
 			return fmt.Errorf("failed to write record batch: %v", err)
 		}
 	}
 
-	e.sourceFile = &filePath
+	// Close writer before releasing records to ensure statistics are written correctly
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("failed to close parquet writer: %v", err)
+	}
 
-	// Release the RecordBatch buffer to free memory
-	e.Release()
+	// Make a copy of the file path on the heap before storing
+	sourceFile := filePath
+	e.sourceFile = &sourceFile
+
+	// Release the in-memory RecordBatch buffers to free memory, but don't delete temp files
+	for _, rec := range e.records {
+		rec.Release()
+	}
+	e.records = nil
 	e.materialized = true
 
 	return nil
