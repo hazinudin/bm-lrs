@@ -158,11 +158,17 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 			return fmt.Errorf("failed to merge parquet files: %v", err)
 		}
 
+		log.Printf("Merged parquet file created at: %s", mergedPath)
+
 		// Create LRSEvents from merged parquet file
 		events, err2 = route_event.NewLRSEventsFromFile(mergedPath, crs)
+
+		log.Printf("Merge file contains %d routes", len(events.GetRouteIDs()))
+
 		if err2 != nil {
 			return fmt.Errorf("error when creating LRSEvents from file: %v", err2)
 		}
+		defer events.Release()
 	} else {
 		// No parquet files created, use records directly
 		if len(records) == 0 {
@@ -195,6 +201,13 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 		events, err = route_event.NewLRSEvents(transformedEvents.GetRecords(), geom.LAMBERT_WKT)
 		if err != nil {
 			return fmt.Errorf("error creating LRSEvents after transformation: %v", err)
+		}
+		log.Print("Successfully transformed events to Lambert CRS")
+		log.Printf("Transformed events schema fields: %v", events.GetRecords()[0].Schema().Fields())
+
+		err = events.Sink()
+		if err != nil {
+			return fmt.Errorf("failed to sink transformed events: %v", err)
 		}
 	}
 
@@ -234,7 +247,7 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 	fmt.Printf("Successfully loaded %d LRS routes into batch\n", routesLoaded)
 
 	// Calculate M-Values
-	resultEvents, err := mvalue.CalculatePointsMValue(ctx, lrs, *events)
+	resultEvents, err := mvalue.CalculatePointsMValue(ctx, routeBatch, *events)
 	if err != nil {
 		return fmt.Errorf("failed to calculate m-values: %v", err)
 	}
