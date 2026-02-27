@@ -103,7 +103,28 @@ func (h *ParquetBatchHandler) MergeParquetFiles() (string, error) {
 	}
 	defer mergedFile.Close()
 
-	// Create writer for merged file using pqarrow
+	// Read the first file to get the correct schema (with metadata)
+	var firstSchema *arrow.Schema
+	for _, filePath := range h.currentFiles {
+		pf, err := file.OpenParquetFile(filePath, false)
+		if err != nil {
+			return "", fmt.Errorf("failed to open parquet file %s: %v", filePath, err)
+		}
+
+		reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{
+			BatchSize: 10000,
+		}, memory.NewGoAllocator())
+		if err != nil {
+			pf.Close()
+			return "", fmt.Errorf("failed to create arrow reader for %s: %v", filePath, err)
+		}
+
+		firstSchema, _ = reader.Schema()
+		pf.Close()
+		break
+	}
+
+	// Create writer for merged file using the schema from the first file (with metadata)
 	mergedWriter, err := pqarrow.NewFileWriter(
 		h.schema,
 		mergedFile,
