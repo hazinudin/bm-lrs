@@ -466,6 +466,7 @@ func (e *LRSEvents) GetRouteIDs() []string {
 			for i := 0; i < c.Len(); i++ {
 				if !c.IsNull(i) {
 					routeIDs[string(c.Value(i))] = struct{}{}
+					}
 				}
 			}
 		}
