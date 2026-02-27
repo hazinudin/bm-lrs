@@ -436,38 +436,38 @@ func (e *LRSEvents) GetRouteIDs() []string {
 		}
 	} else {
 		// Read from in-memory record batches
-	for _, batch := range e.records {
-		schema := batch.Schema()
-		indices := schema.FieldIndices(e.routeIDCol)
-		if len(indices) == 0 {
-			continue
-		}
-		colIdx := indices[0]
-		col := batch.Column(colIdx)
+		for _, batch := range e.records {
+			schema := batch.Schema()
+			indices := schema.FieldIndices(e.routeIDCol)
+			if len(indices) == 0 {
+				continue
+			}
+			colIdx := indices[0]
+			col := batch.Column(colIdx)
 
-		switch c := col.(type) {
-		case *array.String:
-			for i := 0; i < c.Len(); i++ {
-				if !c.IsNull(i) {
-					routeIDs[c.Value(i)] = struct{}{}
+			switch c := col.(type) {
+			case *array.String:
+				for i := 0; i < c.Len(); i++ {
+					if !c.IsNull(i) {
+						routeIDs[c.Value(i)] = struct{}{}
+					}
 				}
-			}
-		case *array.LargeString:
-			for i := 0; i < c.Len(); i++ {
-				if !c.IsNull(i) {
-					routeIDs[c.Value(i)] = struct{}{}
+			case *array.LargeString:
+				for i := 0; i < c.Len(); i++ {
+					if !c.IsNull(i) {
+						routeIDs[c.Value(i)] = struct{}{}
+					}
 				}
-			}
-		case *array.Binary:
-			for i := 0; i < c.Len(); i++ {
-				if !c.IsNull(i) {
-					routeIDs[string(c.Value(i))] = struct{}{}
+			case *array.Binary:
+				for i := 0; i < c.Len(); i++ {
+					if !c.IsNull(i) {
+						routeIDs[string(c.Value(i))] = struct{}{}
+					}
 				}
-			}
-		case *array.LargeBinary:
-			for i := 0; i < c.Len(); i++ {
-				if !c.IsNull(i) {
-					routeIDs[string(c.Value(i))] = struct{}{}
+			case *array.LargeBinary:
+				for i := 0; i < c.Len(); i++ {
+					if !c.IsNull(i) {
+						routeIDs[string(c.Value(i))] = struct{}{}
 					}
 				}
 			}
