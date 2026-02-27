@@ -177,6 +177,13 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 		defer events.Release()
 	}
 
+	// Check if events need to be materialized (loaded from file)
+	if events.IsMaterialized() {
+		if err := events.LoadToBuffer(); err != nil {
+			return fmt.Errorf("failed to materialize events from file: %v", err)
+		}
+	}
+
 	// Check the Events CRS
 	if events.GetCRS() != geom.LAMBERT_WKT {
 		transformedEvents, err := projection.Transform(events, geom.LAMBERT_WKT, false)
