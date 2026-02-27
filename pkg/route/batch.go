@@ -121,13 +121,15 @@ SkipSegment:
 
 		if !route.push_down {
 			l.sourceFiles.LineString = append(l.sourceFiles.LineString, sourceFile{
-				filePath: *linestrFile,
-				routes:   []string{},
+				filePath:     *linestrFile,
+				routes:       []string{},
+				materialized: true,
 			})
 		} else {
 			l.sourceFiles.LineString = append(l.sourceFiles.LineString, sourceFile{
-				filePath: *linestrFile,
-				routes:   []string{route.GetRouteID()},
+				filePath:     *linestrFile,
+				routes:       []string{route.GetRouteID()},
+				materialized: true,
 			})
 		}
 	} else {
