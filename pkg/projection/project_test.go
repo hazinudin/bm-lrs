@@ -3,6 +3,7 @@ package projection
 import (
 	"bm-lrs/pkg/geom"
 	"bm-lrs/pkg/route"
+	"bm-lrs/pkg/route_event"
 	"io"
 	"os"
 	"testing"
