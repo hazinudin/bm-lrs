@@ -303,6 +303,16 @@ func NewLRSEventsFromFile(filePath string, crs string) (*LRSEvents, error) {
 	return out, nil
 }
 
+// detectColumn finds a column name in the schema from a list of possible names
+func detectColumn(schema *arrow.Schema, possibleNames []string) string {
+	for _, name := range possibleNames {
+		if indices := schema.FieldIndices(name); len(indices) > 0 {
+			return name
+		}
+	}
+	return possibleNames[0] // Return first option as default
+}
+
 // GetSourceFile returns the path to the parquet file if materialized
 func (e *LRSEvents) GetSourceFile() *string {
 	return e.sourceFile
