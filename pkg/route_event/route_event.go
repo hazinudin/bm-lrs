@@ -375,6 +375,65 @@ func (e *LRSEvents) GetAttributes() map[string]any {
 // GetRouteIDs returns all unique route IDs from the records
 func (e *LRSEvents) GetRouteIDs() []string {
 	routeIDs := make(map[string]struct{})
+
+	// If data is materialized (stored in parquet file), read from file directly
+	if e.IsMaterialized() && e.sourceFile != nil {
+		pf, err := file.OpenParquetFile(*e.sourceFile, false)
+		if err != nil {
+			return nil // Return empty if we can't open the file
+		}
+		defer pf.Close()
+
+		reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{}, memory.NewGoAllocator())
+		if err != nil {
+			return nil
+		}
+
+		recordReader, err := reader.GetRecordReader(context.Background(), nil, nil)
+		if err != nil {
+			return nil
+		}
+		defer recordReader.Release()
+
+		for recordReader.Next() {
+			batch := recordReader.RecordBatch()
+			schema := batch.Schema()
+			indices := schema.FieldIndices(e.routeIDCol)
+			if len(indices) == 0 {
+				continue
+			}
+			colIdx := indices[0]
+			col := batch.Column(colIdx)
+
+			switch c := col.(type) {
+			case *array.String:
+				for i := 0; i < c.Len(); i++ {
+					if !c.IsNull(i) {
+						routeIDs[c.Value(i)] = struct{}{}
+					}
+				}
+			case *array.LargeString:
+				for i := 0; i < c.Len(); i++ {
+					if !c.IsNull(i) {
+						routeIDs[c.Value(i)] = struct{}{}
+					}
+				}
+			case *array.Binary:
+				for i := 0; i < c.Len(); i++ {
+					if !c.IsNull(i) {
+						routeIDs[string(c.Value(i))] = struct{}{}
+					}
+				}
+			case *array.LargeBinary:
+				for i := 0; i < c.Len(); i++ {
+					if !c.IsNull(i) {
+						routeIDs[string(c.Value(i))] = struct{}{}
+					}
+				}
+			}
+		}
+	} else {
+		// Read from in-memory record batches
 	for _, batch := range e.records {
 		schema := batch.Schema()
 		indices := schema.FieldIndices(e.routeIDCol)
