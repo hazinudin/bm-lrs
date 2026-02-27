@@ -303,4 +303,37 @@ func TestLRSRoute(t *testing.T) {
 
 		},
 	)
+
+	t.Run("Initialize LRSRoute from file and test GetPointFile, GetLineFile, GetSegmentFile", func(t *testing.T) {
+		pointFile := "testdata/lrs_01001_point.parquet"
+		lineFile := "testdata/lrs_01001_linestr.parquet"
+		segmentFile := "testdata/lrs_01001_segment.parquet"
+
+		lrs := &LRSRoute{
+			route_id: "01001",
+			source_files: &sourceFiles{
+				Point:      &pointFile,
+				Segment:    &segmentFile,
+				LineString: &lineFile,
+			},
+		}
+		lrs.setPushDown(true)
+
+		if err != nil {
+			t.Fatalf("NewLRSRouteFromFiles failed: %v", err)
+		}
+		defer lrs.Release()
+
+		if lrs.GetPointFile() == nil || *lrs.GetPointFile() != pointFile {
+			t.Errorf("GetPointFile() returned %v, expected %s", lrs.GetPointFile(), pointFile)
+		}
+
+		if lrs.GetLineFile() == nil || *lrs.GetLineFile() != lineFile {
+			t.Errorf("GetLineFile() returned %v, expected %s", lrs.GetLineFile(), lineFile)
+		}
+
+		if lrs.GetSegmentFile() == nil || *lrs.GetSegmentFile() != segmentFile {
+			t.Errorf("GetSegmentFile() returned %v, expected %s", lrs.GetSegmentFile(), segmentFile)
+		}
+	})
 }
