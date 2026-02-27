@@ -535,6 +535,79 @@ func (r *LRSRouteRepository) GetLatest(ctx context.Context, routeID string) (*LR
 	return out, nil
 }
 
+// GetLatestBatchNoPushdown retrieves the latest LRSRoute data from the catalog
+// as an LRSRouteBatch with no pushdown enabled (reads entire parquet files).
+//
+// This is useful when you want to query all route data without filtering by ROUTEID.
+// The returned batch will generate queries using read_parquet() without WHERE clauses.
+//
+// Note: Since this batch contains no routes (routes map is empty),
+// calling Release() is optional and will be a no-op.
+// It is included for API consistency.
+func (r *LRSRouteRepository) GetLatestBatchNoPushdown(ctx context.Context) (*LRSRouteBatch, error) {
+	// Install postgres extension
+	if _, err := r.db.ExecContext(ctx, "INSTALL postgres; LOAD postgres;"); err != nil {
+		return nil, fmt.Errorf("failed to load postgres extension: %w", err)
+	}
+
+	// Attach Postgres
+	_, err := r.db.ExecContext(ctx, fmt.Sprintf("ATTACH IF NOT EXISTS '%s' AS postgres_db (TYPE POSTGRES)", r.pgConnStr))
+	if err != nil {
+		return nil, fmt.Errorf("failed to attach postgres: %w", err)
+	}
+
+	// Query for latest active catalog entry (END_DATE is NULL means active)
+	query := `
+		SELECT LRS_POINT_FILE, LRS_SEGMENT_FILE, LRS_LINESTR_FILE, VERSION
+		FROM postgres_db.lrs_catalogs
+		WHERE END_DATE IS NULL
+		ORDER BY VERSION DESC
+		LIMIT 1
+	`
+	var segmentPath, linestringPath, pointPath string
+	var version int
+	err = r.db.QueryRowContext(ctx, query).Scan(&pointPath, &segmentPath, &linestringPath, &version)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("no active catalog entry found")
+		}
+		return nil, fmt.Errorf("failed to query latest catalog: %w", err)
+	}
+
+	// Create the batch with no-pushdown source files
+	batch := &LRSRouteBatch{
+		routes: make(map[string]LRSRoute),
+		sourceFiles: &batchSourceFiles{
+			Point: []sourceFile{
+				{
+					filePath:     pointPath,
+					routes:       []string{}, // Empty array = no pushdown
+					materialized: true,
+				},
+			},
+			Segment: []sourceFile{
+				{
+					filePath:     segmentPath,
+					routes:       []string{}, // Empty array = no pushdown
+					materialized: true,
+				},
+			},
+			LineString: []sourceFile{
+				{
+					filePath:     linestringPath,
+					routes:       []string{}, // Empty array = no pushdown
+					materialized: true,
+				},
+			},
+		},
+		latitudeCol:  "LAT",
+		longitudeCol: "LON",
+		mValueCol:    "MVAL",
+	}
+
+	return batch, nil
+}
+
 // GenerateArcGISToken generates a token for ArcGIS Portal
 func (r *LRSRouteRepository) GenerateArcGISToken(ctx context.Context) (string, error) {
 	username := os.Getenv("ARCGIS_USER")
