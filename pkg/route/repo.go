@@ -524,7 +524,7 @@ func (r *LRSRouteRepository) GetLatest(ctx context.Context, routeID string) (*LR
 		longitudeCol:    "LON",
 		mValueCol:       "MVAL",
 		VertexSeqColumn: "VERTEX_SEQ",
-		crs:             "EPSG:4326",
+		crs:             geom.LAMBERT_WKT,
 		source_files: &sourceFiles{
 			Point:      &pointPath,
 			Segment:    &segmentPath,
