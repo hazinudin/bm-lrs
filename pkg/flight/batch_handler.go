@@ -126,7 +126,7 @@ func (h *ParquetBatchHandler) MergeParquetFiles() (string, error) {
 
 	// Create writer for merged file using the schema from the first file (with metadata)
 	mergedWriter, err := pqarrow.NewFileWriter(
-		h.schema,
+		firstSchema,
 		mergedFile,
 		parquet.NewWriterProperties(parquet.WithCompression(compress.Codecs.Snappy)),
 		pqarrow.DefaultWriterProps(),
