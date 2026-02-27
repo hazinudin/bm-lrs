@@ -318,6 +318,49 @@ func (e *LRSEvents) GetSourceFile() *string {
 	return e.sourceFile
 }
 
+// LoadToBuffer reads records from source file if not already loaded
+func (e *LRSEvents) LoadToBuffer() error {
+	if e.sourceFile == nil || len(e.records) > 0 {
+		return nil // Already materialized or no source file
+	}
+
+	pf, err := file.OpenParquetFile(*e.sourceFile, false)
+	if err != nil {
+		return fmt.Errorf("failed to open parquet file: %v", err)
+	}
+	defer pf.Close()
+
+	reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{}, memory.NewGoAllocator())
+	if err != nil {
+		return fmt.Errorf("failed to create arrow reader: %v", err)
+	}
+
+	recordReader, err := reader.GetRecordReader(context.Background(), nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to get record reader: %v", err)
+	}
+	defer recordReader.Release()
+
+	var recs []arrow.RecordBatch
+	for recordReader.Next() {
+		rec := recordReader.RecordBatch()
+		rec.Retain()
+		recs = append(recs, rec)
+	}
+
+	if err := recordReader.Err(); err != nil {
+		for _, rec := range recs {
+			rec.Release()
+		}
+		return fmt.Errorf("error reading records: %v", err)
+	}
+
+	e.records = recs
+	e.materialized = false
+
+	return nil
+}
+
 // GetAttributes returns a map of attributes related to the events
 func (e *LRSEvents) GetAttributes() map[string]any {
 	return map[string]any{
