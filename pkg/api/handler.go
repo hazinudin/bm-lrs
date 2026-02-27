@@ -6,6 +6,7 @@ import (
 	"bm-lrs/pkg/projection"
 	"bm-lrs/pkg/route"
 	"bm-lrs/pkg/route_event"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -105,10 +106,9 @@ func (h *APIHandler) CalculateMValueHandler(w http.ResponseWriter, r *http.Reque
 
 	// For now, process the first route (could be extended to handle multiple routes)
 	start = time.Now()
-	routeID := routeIDs[0]
-	lrs, err := h.repo.GetLatest(r.Context(), routeID)
+	lrs, err := h.repo.GetLatestBatchWithRoutes(context.Background(), routeIDs)
 	if err != nil {
-		h.sendError(w, http.StatusNotFound, fmt.Sprintf("failed to get LRS route for %s: %v", routeID, err))
+		h.sendError(w, http.StatusInternalServerError, fmt.Sprintf("failed to fetch LRS data: %v", err))
 		return
 	}
 	defer lrs.Release()
