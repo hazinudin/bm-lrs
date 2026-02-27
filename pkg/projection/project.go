@@ -120,26 +120,26 @@ func Transform(obj geom.Geometry, crs string, inverted bool) (geom.Geometry, err
 		rec.Retain()
 
 		recs = append(recs, rec)
+	}
 
-		switch obj.GetGeometryType() {
+	switch obj.GetGeometryType() {
 
-		case geom.LRS:
-			out := route.NewLRSRoute(
-				obj.GetAttributes()["RouteID"].(string),
-				recs,
-				crs,
-			)
+	case geom.LRS:
+		out := route.NewLRSRoute(
+			obj.GetAttributes()["RouteID"].(string),
+			recs,
+			crs,
+		)
 
-			return &out, nil
+		return &out, nil
 
-		case geom.POINTS:
-			out := geom.NewPoints(
-				recs,
-				crs,
-			)
+	case geom.POINTS:
+		out := geom.NewPoints(
+			recs,
+			crs,
+		)
 
-			return &out, nil
-		}
+		return &out, nil
 	}
 
 	return nil, nil
