@@ -455,3 +455,97 @@ func TestSyncAll(t *testing.T) {
 	db.ExecContext(ctx, "DELETE FROM postgres_db.lrs_catalogs WHERE AUTHOR = 'TESTER_ALL'")
 	db.ExecContext(ctx, "DROP TABLE IF EXISTS postgres_db.lrs_routes")
 }
+
+func TestGetLatestBatchNoPushdown(t *testing.T) {
+	// Setup DuckDB connector
+	connector, err := duckdb.NewConnector("", nil)
+	if err != nil {
+		t.Fatalf("Failed to create DuckDB connector: %v", err)
+	}
+	defer connector.Close()
+
+	// Open DB for SQL operation
+	db := sql.OpenDB(connector)
+	defer db.Close()
+
+	// Initial cleanup
+	ctx := context.Background()
+	_, _ = db.ExecContext(ctx, "install postgres; load postgres;")
+	_, _ = db.ExecContext(ctx, fmt.Sprintf("ATTACH IF NOT EXISTS '%s' AS postgres_db (TYPE POSTGRES)", testPgConnStr))
+	_, _ = db.ExecContext(ctx, "DELETE FROM postgres_db.lrs_catalogs")
+
+	// Create temp directory for output files
+	tempDir, err := os.MkdirTemp("", "lrs_nopushdown_test_*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Set env for data directory
+	os.Setenv("LRS_DATA_DIR", tempDir)
+	defer os.Unsetenv("LRS_DATA_DIR")
+
+	// Read test GeoJSON data and sync to create catalog entries
+	jsonFile, err := os.Open("./testdata/lrs_01001.json")
+	if err != nil {
+		t.Fatalf("Failed to open test JSON: %v", err)
+	}
+	defer jsonFile.Close()
+
+	jsonBytes, err := io.ReadAll(jsonFile)
+	if err != nil {
+		t.Fatalf("Failed to read test JSON: %v", err)
+	}
+
+	// Create repository and sync data to create catalog
+	repo := NewLRSRouteRepository(connector, testPgConnStr, db)
+	err = repo.SyncFromGeoJSON(ctx, jsonBytes, SyncOptions{Author: "SYSTEM", CommitMsg: "TEST"})
+	if err != nil {
+		t.Fatalf("SyncFromGeoJSON failed: %v", err)
+	}
+
+	// Test GetLatestBatchNoPushdown
+	batch, err := repo.GetLatestBatchNoPushdown(ctx)
+	if err != nil {
+		t.Fatalf("GetLatestBatchNoPushdown failed: %v", err)
+	}
+	defer batch.Release()
+
+	// Verify batch structure
+	if len(batch.routes) != 0 {
+		t.Errorf("Expected 0 routes, got %d", len(batch.routes))
+	}
+
+	if len(batch.sourceFiles.Point) != 1 {
+		t.Errorf("Expected 1 point source file, got %d", len(batch.sourceFiles.Point))
+	}
+
+	if len(batch.sourceFiles.Point[0].routes) != 0 {
+		t.Errorf("Expected empty routes array for no-pushdown, got %d routes",
+			len(batch.sourceFiles.Point[0].routes))
+	}
+
+	// Verify query is no-pushdown (read_parquet without WHERE)
+	viewQuery := batch.ViewName()
+	if !strings.Contains(viewQuery, "read_parquet") {
+		t.Errorf("Expected read_parquet in query, got: %s", viewQuery)
+	}
+	if strings.Contains(viewQuery, "WHERE") {
+		t.Errorf("Query should not contain WHERE clause for no-pushdown, got: %s", viewQuery)
+	}
+
+	// Verify column names
+	if batch.LatitudeColumn() != "LAT" {
+		t.Errorf("Expected LAT, got %s", batch.LatitudeColumn())
+	}
+	if batch.LongitudeColumn() != "LON" {
+		t.Errorf("Expected LON, got %s", batch.LongitudeColumn())
+	}
+	if batch.MValueColumn() != "MVAL" {
+		t.Errorf("Expected MVAL, got %s", batch.MValueColumn())
+	}
+
+	// Cleanup
+	db.ExecContext(ctx, "DELETE FROM postgres_db.lrs_catalogs")
+	db.ExecContext(ctx, "DROP TABLE IF EXISTS postgres_db.lrs_routes")
+}
