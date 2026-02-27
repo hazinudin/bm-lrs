@@ -121,7 +121,6 @@ func (h *ParquetBatchHandler) MergeParquetFiles() (string, error) {
 
 		firstSchema, _ = reader.Schema()
 		pf.Close()
-		break
 	}
 
 	// Create writer for merged file using the schema from the first file (with metadata)
