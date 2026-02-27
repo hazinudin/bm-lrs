@@ -204,14 +204,34 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 		return fmt.Errorf("no ROUTEID found in records")
 	}
 
-	// For now, assume one route ID per exchange or handle the first one
-	// Ideally we handle multiple routes if needed, but CalculatePointsMValue takes one LRS route.
-	routeID := routeIDs[0]
-	lrs, err := s.repo.GetLatest(ctx, routeID)
-	if err != nil {
-		return fmt.Errorf("failed to get LRS route for %s: %v", routeID, err)
+	fmt.Printf("Found %d unique route IDs\n", len(routeIDs))
+
+	// Create a batch to handle multiple routes
+	routeBatch := &route.LRSRouteBatch{}
+	routesLoaded := 0
+
+	// Load all LRS routes
+	for _, routeID := range routeIDs {
+		lrs, err := s.repo.GetLatest(ctx, routeID)
+		if err != nil {
+			fmt.Printf("Warning: failed to get LRS route for %s: %v (skipping)\n", routeID, err)
+			continue
+		}
+		defer lrs.Release()
+
+		if err := routeBatch.AddRoute(*lrs); err != nil {
+			fmt.Printf("Warning: failed to add route %s to batch: %v (skipping)\n", routeID, err)
+			lrs.Release()
+			continue
+		}
+		routesLoaded++
 	}
-	defer lrs.Release()
+
+	if routesLoaded == 0 {
+		return fmt.Errorf("failed to load any LRS routes for %d route IDs", len(routeIDs))
+	}
+
+	fmt.Printf("Successfully loaded %d LRS routes into batch\n", routesLoaded)
 
 	// Calculate M-Values
 	resultEvents, err := mvalue.CalculatePointsMValue(ctx, lrs, *events)
