@@ -128,4 +128,29 @@ func TestTransform(t *testing.T) {
 			new_lrs.Release()
 		},
 	)
+
+	t.Run(
+		"Project LRS Route event", func(t *testing.T) {
+			event, err := route_event.NewLRSEventsFromFile("../../scratch/rni_2_2025_rename.parquet", "EPSG:4326")
+			defer event.Release()
+
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			event.LoadToBuffer()
+
+			geom_out, err := Transform(event, geom.LAMBERT_WKT, true)
+			if err != nil {
+				t.Error(err)
+			}
+
+			new_event, err := route_event.NewLRSEvents(geom_out.GetRecords(), geom.LAMBERT_WKT)
+			t.Logf("Total Route IDs in new event: %d", len(new_event.GetRouteIDs()))
+
+			new_event.Sink()
+			t.Logf("Total Route IDs in new event after sink: %d", len(new_event.GetRouteIDs()))
+			new_event.Release()
+		},
+	)
 }
