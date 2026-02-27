@@ -68,6 +68,19 @@ func TestGetRouteIDs(t *testing.T) {
 	assert.ElementsMatch(t, []string{"01002"}, routeIDs)
 }
 
+func TestNewLRSEventsFromFile(t *testing.T) {
+	events, err := route_event.NewLRSEventsFromFile("../../scratch/rni_2_2025.parquet", "EPSG:4326")
+	assert.NoError(t, err)
+	assert.NotNil(t, events)
+
+	routeIDs := events.GetRouteIDs()
+	assert.True(t, len(routeIDs) > 0)
+	assert.Contains(t, routeIDs, "01002")
+	t.Logf("RouteID count: %d", len(routeIDs))
+
+	events.Release()
+}
+
 func TestNewLRSEventsFromGeoJSON(t *testing.T) {
 	data, err := os.ReadFile("testdata/events.geojson")
 	assert.NoError(t, err)
