@@ -127,6 +127,36 @@ bm-lrs/
 - **PostgreSQL** (for catalog storage)
 - **ArcGIS Portal credentials** (for data sync)
 
+### DuckDB Spatial Extension
+
+This project requires **DuckDB Spatial extension v1.4-andium or later** for M-value calculation using `ST_InterpolatePoint`. The extension is automatically loaded during runtime via `INSTALL spatial; LOAD spatial;` commands.
+
+The spatial extension is bundled with the DuckDB Go bindings and should be automatically available. If you encounter issues, ensure you're using the correct build tags:
+
+```bash
+go build -tags=duckdb_arrow ./...
+go test -tags=duckdb_arrow ./...
+```
+
+### Feature Flag
+
+M-value calculation uses `ST_InterpolatePoint` by default (simplified implementation). To use the legacy CTE-based implementation:
+
+```bash
+export ST_INTERPOLATE_POINT_ENABLED=false
+```
+
+Or programmatically:
+
+```go
+config.SetUseSTInterpolatePoint(false)
+```
+
+The new implementation provides:
+- ~60% reduction in code complexity (5 CTEs → 1 simple join)
+- Slightly better performance
+- More accurate M-value interpolation
+
 ### Environment Variables
 
 Create a `.env` file:
