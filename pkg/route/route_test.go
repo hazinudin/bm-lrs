@@ -253,6 +253,18 @@ func TestLRSRoute(t *testing.T) {
 			if err != nil {
 				t.Error(err)
 			}
+
+			// Verify M-dimension was added to linestring after regeneration
+			hasMResult, err := db.QueryContext(context.Background(),
+				"SELECT ST_HasM(ST_GeomFromWKB(linestr)) FROM read_parquet('testdata/lrs_01001_linestr.parquet')")
+			if err != nil {
+				t.Fatalf("Failed to check M-dimension: %v", err)
+			}
+			hasM := hasMResult.Next()
+			hasMResult.Close()
+			if !hasM {
+				t.Fatal("Linestring does not have M dimension after regeneration")
+			}
 		},
 	)
 

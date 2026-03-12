@@ -1,6 +1,7 @@
 package mvalue
 
 import (
+	"bm-lrs/pkg/config"
 	"bm-lrs/pkg/route"
 	"bm-lrs/pkg/route_event"
 	"context"
@@ -13,8 +14,198 @@ import (
 )
 
 // CalculatePointsMValue calculates the M-Value of points relative to an LRS route.
-// It uses DuckDB spatial extension for shortest line and interpolation.
+// Uses DuckDB Spatial's ST_InterpolatePoint function for simplified interpolation.
+// Falls back to complex CTE-based implementation if feature flag disabled.
+// Requires DuckDB Spatial v1.4-andium+ for ST_InterpolatePoint.
 func CalculatePointsMValue(ctx context.Context, lrs route.LRSRouteInterface, points route_event.LRSEvents) (*route_event.LRSEvents, error) {
+	// Check feature flag at runtime
+	if config.UseSTInterpolatePoint() {
+		// Use NEW: Simplified ST_InterpolatePoint implementation
+		return calculatePointsMValueNew(ctx, lrs, points)
+	}
+
+	// Use ORIGINAL: Complex CTE-based implementation (unchanged)
+	return calculatePointsMValueOriginal(ctx, lrs, points)
+}
+
+// calculatePointsMValueNew implements M-value interpolation using ST_InterpolatePoint.
+// This is the simplified implementation that leverages DuckDB Spatial's built-in function.
+// Requires linestring to have M-values (ST_HasM returns true).
+func calculatePointsMValueNew(ctx context.Context, lrs route.LRSRouteInterface, points route_event.LRSEvents) (*route_event.LRSEvents, error) {
+	c, err := duckdb.NewConnector("", nil)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer c.Close()
+
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	ar, err := duckdb.NewArrowFromConn(conn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create arrow from duckdb: %v", err)
+	}
+
+	// Get a single connection to ensure temporary tables are visible across calls
+	db := sql.OpenDB(c)
+	defer db.Close()
+
+	conn_sql, err := db.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sql connection: %v", err)
+	}
+	defer conn_sql.Close()
+
+	if _, err := conn_sql.ExecContext(ctx, "INSTALL spatial; LOAD spatial;"); err != nil {
+		return nil, fmt.Errorf("failed to load spatial extension: %v", err)
+	}
+
+	// Register Points
+	// Only register records if LRSEvents is not materialized (IsMaterialized is false)
+	// If LRSEvents is already materialized, register a table view referring to the parquet file
+	if points.IsMaterialized() {
+		// LRSEvents is already materialized - use the parquet file directly
+		sourceFile := points.GetSourceFile()
+		if sourceFile == nil {
+			return nil, fmt.Errorf("LRSEvents is materialized but no source file is available")
+		}
+
+		if _, err := ar.QueryContext(ctx, fmt.Sprintf("CREATE TEMP TABLE points_table AS SELECT *, row_number() OVER () as point_id FROM read_parquet('%s')", *sourceFile)); err != nil {
+			return nil, fmt.Errorf("failed to create points table from parquet file: %v", err)
+		}
+	} else {
+		// LRSEvents is not materialized - register records as a view
+		pointsRecords := points.GetRecords()
+		if len(pointsRecords) == 0 {
+			return nil, fmt.Errorf("points records are empty")
+		}
+
+		pointsReader, err := array.NewRecordReader(pointsRecords[0].Schema(), pointsRecords)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create points record reader: %v", err)
+		}
+		defer pointsReader.Release()
+
+		releasePoints, err := ar.RegisterView(pointsReader, "points_raw_view")
+		if err != nil {
+			return nil, fmt.Errorf("failed to register points view: %v", err)
+		}
+		defer releasePoints()
+
+		if _, err := ar.QueryContext(ctx, "CREATE TEMP TABLE points_table AS SELECT *, row_number() OVER () as point_id FROM points_raw_view"); err != nil {
+			return nil, fmt.Errorf("failed to create points table view: %v", err)
+		}
+	}
+
+	// Create view for LRS line and segments
+	if _, err := ar.QueryContext(ctx, fmt.Sprintf("CREATE TEMP TABLE lrs_line_table AS (%s)", lrs.LinestringQuery())); err != nil {
+		return nil, fmt.Errorf("failed to create lrs line view: %v", err)
+	}
+
+	if _, err := ar.QueryContext(ctx, fmt.Sprintf("CREATE TEMP TABLE lrs_segment_table AS (%s)", lrs.SegmentQuery())); err != nil {
+		return nil, fmt.Errorf("failed to create lrs segment view: %v", err)
+	}
+
+	// Check if MVAL column exists in input to decide on EXCLUDE
+	hasMVAL := false
+	if !points.IsMaterialized() {
+		// When not materialized, we can check the schema directly from records
+		pointsRecords := points.GetRecords()
+		if len(pointsRecords) > 0 {
+			for _, f := range pointsRecords[0].Schema().Fields() {
+				if f.Name == points.MValueColumn() {
+					hasMVAL = true
+					break
+				}
+			}
+		}
+	} else {
+		// When materialized, query the parquet schema from the temporary table
+		sourceFile := points.GetSourceFile()
+		if sourceFile != nil {
+			columns, err := ar.QueryContext(ctx, fmt.Sprintf("DESCRIBE SELECT * FROM read_parquet('%s') LIMIT 0", *sourceFile))
+			if err == nil {
+				defer columns.Release()
+				for columns.Next() {
+					rec := columns.RecordBatch()
+					colNames := rec.ColumnName(0)
+					if colNames == points.MValueColumn() {
+						hasMVAL = true
+						break
+					}
+				}
+			}
+		}
+	}
+
+	excludeClause := "point_id"
+	if hasMVAL {
+		excludeClause = fmt.Sprintf(`"%s", point_id`, points.MValueColumn())
+	}
+
+	// Simplified query using ST_InterpolatePoint
+	// ST_InterpolatePoint requires linestring to have M-values
+	// NOTE: ST_Point expects (x, y) = (longitude, latitude) order, not (lat, lon)
+	query := fmt.Sprintf(`
+	SELECT 
+		p.* EXCLUDE (%s),
+		ST_InterpolatePoint(b.linestr, ST_Point("%s", "%s")) as "%s",
+		ST_Distance(b.linestr, ST_Point("%s", "%s")) as dist_to_line
+	FROM points_table p
+	JOIN lrs_line_table b ON p.ROUTEID = b.ROUTEID
+	ORDER BY p.point_id
+	`,
+		excludeClause,
+		points.LongitudeColumn(), points.LatitudeColumn(),
+		points.MValueColumn(),
+		points.LongitudeColumn(), points.LatitudeColumn())
+
+	// Debug: check counts
+	var pointsCount, lrsLineCount, lrsSegmentCount int
+	conn_sql.QueryRowContext(ctx, "SELECT count(*) FROM points_table").Scan(&pointsCount)
+	conn_sql.QueryRowContext(ctx, "SELECT count(*) FROM lrs_line_table").Scan(&lrsLineCount)
+	conn_sql.QueryRowContext(ctx, "SELECT count(*) FROM lrs_segment_table").Scan(&lrsSegmentCount)
+
+	// Use ar.QueryContext to get a RecordReader back
+	outReader, err := ar.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute interpolation query: %v", err)
+	}
+	defer outReader.Release()
+
+	var outRecs []arrow.RecordBatch
+	for outReader.Next() {
+		rec := outReader.RecordBatch()
+		rec.Retain()
+		outRecs = append(outRecs, rec)
+	}
+
+	if len(outRecs) == 0 {
+		return nil, fmt.Errorf("expected records, got 0. Counts: points=%d, lrs_line=%d, lrs_segment=%d", pointsCount, lrsLineCount, lrsSegmentCount)
+	}
+
+	out, err := route_event.NewLRSEvents(outRecs, points.GetCRS())
+	if err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
+// calculatePointsMValueOriginal implements M-value interpolation using CTEs.
+// DEPRECATED: Kept for backward compatibility via feature flag.
+// Use calculatePointsMValueNew() with ST_InterpolatePoint instead.
+// Will be removed after migration period (target: v2.0.0).
+//
+// This implementation uses multiple CTEs for:
+// - Finding shortest line to route
+// - Identifying nearest vertex
+// - Manual M-value interpolation
+func calculatePointsMValueOriginal(ctx context.Context, lrs route.LRSRouteInterface, points route_event.LRSEvents) (*route_event.LRSEvents, error) {
 	c, err := duckdb.NewConnector("", nil)
 
 	if err != nil {

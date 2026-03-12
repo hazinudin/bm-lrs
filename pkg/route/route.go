@@ -267,6 +267,9 @@ func (l *LRSRoute) SegmentQuery() string {
 }
 
 // LRS Route line string query.
+// Constructs WKT string "LINESTRING ZM" to create M-enabled linestring.
+// Z coordinate set to 0 (placeholder), M values from vertex MVAL column.
+// ST_GeomFromText parses WKT to create 3DM linestring for ST_InterpolatePoint support.
 func (l *LRSRoute) LinestringQuery() string {
 	if l.GetSegmentFile() != nil {
 		if l.push_down {
@@ -275,11 +278,20 @@ func (l *LRSRoute) LinestringQuery() string {
 			return fmt.Sprintf(`select * from "%s"`, *l.GetLineFile())
 		}
 	} else {
+		// Construct WKT string with M-values: "LINESTRING ZM (lon lat 0 mval, lon lat 0 mval, ...)"
+		// Z coordinate set to 0 (placeholder, not used for LRS but required for ZM format)
 		query := `
-		select {{.RouteID}} as ROUTEID, ST_Makeline(
-		list(ST_Point({{.LatCol}}, {{.LongCol}}) order by {{.VertexSeqCol}} asc)
-		) as linestr 
-		from {{.ViewName}}
+		SELECT {{.RouteID}} as ROUTEID,
+			ST_GeomFromText(
+				'LINESTRING ZM (' || 
+					STRING_AGG(
+						CONCAT({{.LongCol}}, ' ', {{.LatCol}}, ' 0 ', {{.MvalCol}}), 
+						', ' 
+						ORDER BY {{.VertexSeqCol}} ASC
+					) || 
+				')'
+			) as linestr
+		FROM {{.ViewName}}
 		`
 
 		data := map[string]string{
