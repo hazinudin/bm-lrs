@@ -231,7 +231,7 @@ func (l *LRSRouteBatch) LinestringQuery() string {
 				noPushDownFiles = append(noPushDownFiles, sf.filePath)
 			} else {
 				routeList := strings.Join(sf.routes, "','")
-				queries = append(queries, fmt.Sprintf(`SELECT * FROM "%s" WHERE ROUTEID IN ['%s']`, sf.filePath, routeList))
+				queries = append(queries, fmt.Sprintf(`SELECT ROUTEID, ST_GeomFromWKB(linestr) as linestr FROM "%s" WHERE ROUTEID IN ['%s']`, sf.filePath, routeList))
 			}
 		} else {
 			queries = append(queries, sf.filePath)
@@ -243,7 +243,7 @@ func (l *LRSRouteBatch) LinestringQuery() string {
 		for i, f := range noPushDownFiles {
 			noPushDownFilesQuoted[i] = fmt.Sprintf("'%s'", f)
 		}
-		noPushDownQuery := fmt.Sprintf(`SELECT * FROM read_parquet([%s])`, strings.Join(noPushDownFilesQuoted, ", "))
+		noPushDownQuery := fmt.Sprintf(`SELECT ROUTEID, ST_GeomFromWKB(linestr) as linestr FROM read_parquet([%s])`, strings.Join(noPushDownFilesQuoted, ", "))
 		queries = append(queries, noPushDownQuery)
 	}
 

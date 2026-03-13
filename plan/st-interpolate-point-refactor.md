@@ -223,7 +223,7 @@ Refactor M-value interpolation system to leverage DuckDB Spatial's built-in `ST_
 ## Phase 4: Test Suite Updates
 
 ### Task 4.1: Update M-value Test Assertions
-- **Agent:** general
+- **Agent:** reviewer
 - **Action:** Update expected M-values in mvalue tests
 - **Steps:**
   1. Review `pkg/mvalue/mvalue_test.go:21-135` (TestCalculatePointsMValue)
@@ -242,7 +242,7 @@ Refactor M-value interpolation system to leverage DuckDB Spatial's built-in `ST_
 - **Deliverable:** All test assertions updated for both implementations
 
 ### Task 4.2: Update Linestring Query Tests
-- **Agent:** general
+- **Agent:** reviewer
 - **Action:** Verify linestring tests work with M-enabled linestrings
 - **Steps:**
   1. Review `pkg/route/route_test.go:307-338` ("Initialize LRSRoute from file")
@@ -255,7 +255,7 @@ Refactor M-value interpolation system to leverage DuckDB Spatial's built-in `ST_
 - **Deliverable:** All linestring query tests pass with M-enabled linestrings
 
 ### Task 4.3: Update API and Flight Handler Tests
-- **Agent:** general
+- **Agent:** reviewer
 - **Action:** Update API and Flight endpoint tests
 - **Steps:**
   1. Review `pkg/api/handler_test.go` (M-value calculation tests)
@@ -270,7 +270,7 @@ Refactor M-value interpolation system to leverage DuckDB Spatial's built-in `ST_
 - **Deliverable:** API and Flight tests pass with both implementations
 
 ### Task 4.4: Add Edge Case Tests
-- **Agent:** general
+- **Agent:** reviewer
 - **Action:** Create comprehensive edge case tests
 - **Steps:**
   1. Create new test function `TestCalculatePointsMValueEdgeCases` in `pkg/mvalue/mvalue_test.go`
@@ -293,7 +293,7 @@ Refactor M-value interpolation system to leverage DuckDB Spatial's built-in `ST_
 ## Phase 5: Validation & Testing
 
 ### Task 5.1: Run Full Test Suite
-- **Agent:** general
+- **Agent:** reviewer
 - **Action:** Execute all tests to verify no regressions
 - **Steps:**
   1. Run: `go test ./...` from project root with feature flag enabled
@@ -305,7 +305,7 @@ Refactor M-value interpolation system to leverage DuckDB Spatial's built-in `ST_
 - **Deliverable:** Full test suite passes with both feature flag states
 
 ### Task 5.2: Performance Benchmarking
-- **Agent:** general
+- **Agent:** reviewer
 - **Action:** Compare performance of old vs new implementation
 - **Steps:**
   1. Create benchmark function `BenchmarkCalculatePointsMValue` in `pkg/mvalue/mvalue_test.go`
@@ -334,7 +334,7 @@ Refactor M-value interpolation system to leverage DuckDB Spatial's built-in `ST_
 - **Deliverable:** Performance comparison report with expected 60%+ complexity reduction
 
 ### Task 5.3: Integration Testing
-- **Agent:** general
+- **Agent:** reviewer
 - **Action:** Test with real-world data if available
 - **Steps:**
   1. If sample production data exists in `scratch/` directory

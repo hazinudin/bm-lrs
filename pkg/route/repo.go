@@ -401,8 +401,10 @@ func (r *LRSRouteRepository) mergeWithExisting(ctx context.Context, lrsBatch *LR
 
 	var queryLinestr string
 	if hasPrev && prevLinestrFile != "" {
+		// Note: LINESTRING ZM is not supported for direct write to GeoParquet, so the linestr column
+		// appears as BLOB when loaded. Use ST_GeomFromWKB() to convert it to geometry type.
 		queryLinestr = fmt.Sprintf(`
-			SELECT * FROM '%s' WHERE ROUTEID NOT IN (SELECT DISTINCT(ROUTEID) FROM (%s))
+			SELECT ROUTEID, ST_GeomFromWKB(linestr) as linestr FROM read_parquet('%s') WHERE ROUTEID NOT IN (SELECT DISTINCT(ROUTEID) FROM (%s))
 			UNION ALL
 			%s
 		`, prevLinestrFile, currentLinestrQuery, currentLinestrQuery)

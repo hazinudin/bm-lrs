@@ -273,9 +273,9 @@ func (l *LRSRoute) SegmentQuery() string {
 func (l *LRSRoute) LinestringQuery() string {
 	if l.GetSegmentFile() != nil {
 		if l.push_down {
-			return fmt.Sprintf(`select * from "%s" where ROUTEID = '%s'`, *l.GetLineFile(), l.GetRouteID())
+			return fmt.Sprintf(`select ROUTEID, ST_GeomFromWKB(linestr) as linestr from "%s" where ROUTEID = '%s'`, *l.GetLineFile(), l.GetRouteID())
 		} else {
-			return fmt.Sprintf(`select * from "%s"`, *l.GetLineFile())
+			return fmt.Sprintf(`select ROUTEID, ST_GeomFromWKB(linestr) as linestr from "%s"`, *l.GetLineFile())
 		}
 	} else {
 		// Construct WKT string with M-values: "LINESTRING ZM (lon lat 0 mval, lon lat 0 mval, ...)"

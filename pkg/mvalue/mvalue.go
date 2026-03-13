@@ -150,11 +150,12 @@ func calculatePointsMValueNew(ctx context.Context, lrs route.LRSRouteInterface, 
 	// Simplified query using ST_InterpolatePoint
 	// ST_InterpolatePoint requires linestring to have M-values
 	// NOTE: ST_Point expects (x, y) = (longitude, latitude) order, not (lat, lon)
+	// NOTE: lrs_line_table.linestr is already GEOMETRY (converted in LinestringQuery)
 	query := fmt.Sprintf(`
 	SELECT 
 		p.* EXCLUDE (%s),
-		ST_InterpolatePoint(b.linestr, ST_Point("%s", "%s")) as "%s",
-		ST_Distance(b.linestr, ST_Point("%s", "%s")) as dist_to_line
+		ST_InterpolatePoint(b.linestr, ST_Point(%s, %s)) as "%s",
+		ST_Distance(b.linestr, ST_Point(%s, %s)) as dist_to_line
 	FROM points_table p
 	JOIN lrs_line_table b ON p.ROUTEID = b.ROUTEID
 	ORDER BY p.point_id
