@@ -93,6 +93,16 @@ A high-performance **Linear Referencing System (LRS)** service built in Go, desi
 - Supports projection between EPSG:4326 (WGS84) and Indonesia Lambert Conformal Conic
 - Input data is transparently reprojected before spatial calculations
 
+### Geometry Storage Note
+- **LINESTRING ZM**: When loading Parquet files containing LINESTRING ZM geometries, the `linestr` column will appear as a `BLOB` type in DuckDB
+- This occurs because DuckDB/GeoParquet does not currently support direct write of LINESTRING ZM (with both Z and M values) to the Parquet format
+- To use these geometries, convert them using DuckDB's spatial functions:
+  ```sql
+  LOAD spatial;
+  SELECT ST_GeomFromWKB(linestr) FROM read_parquet('path/to/file.parquet');
+  ```
+- The geometry will be correctly interpreted as LINESTRING after conversion with `ST_GeomFromWKB()`
+
 ---
 
 ## Project Structure

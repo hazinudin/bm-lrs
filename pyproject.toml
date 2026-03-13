@@ -5,7 +5,9 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "oracledb>=3.4.2",
     "polars>=1.38.0",
     "pyarrow>=23.0.0",
     "ruff>=0.15.0",
+    "sqlalchemy>=2.0.47",
 ]

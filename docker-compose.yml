@@ -1,0 +1,29 @@
+services:
+  init-lrs:
+    image: ${REGISTRY_URL:-}bm-lrs-init:latest
+    env_file: .env
+    environment:
+      - LRS_DATA_DIR=/data
+    volumes:
+      - /home/SMD/lrs-service:/data
+    networks:
+      - db_network
+
+  server:
+    image: ${REGISTRY_URL:-}bm-lrs-server:latest
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+      - "50051:50051"
+    env_file: .env
+    environment:
+      - LRS_DATA_DIR=/data
+    volumes:
+      - /home/SMD/lrs-service:/data
+    networks:
+      - db_network
+
+networks:
+  db_network:
+    external: true
+    name: bm-route-events_backend
