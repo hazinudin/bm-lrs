@@ -14,6 +14,7 @@ class LRSClient:
     def __init__(self, location: str) -> None:
         self._location = location
         self._client: pa_flight.FlightClient | None = None
+        self._chunk_size = 4096
 
     def connect(self) -> None:
         try:
@@ -73,10 +74,9 @@ class LRSClient:
             table = table.cast(input_schema)
             writer.begin(input_schema)
 
-            chunk_size = 10000
             total_rows = table.num_rows
-            for offset in range(0, total_rows, chunk_size):
-                chunk_end = min(offset + chunk_size, total_rows)
+            for offset in range(0, total_rows, self._chunk_size):
+                chunk_end = min(offset + self._chunk_size, total_rows)
                 chunk_table = table.slice(offset, chunk_end - offset)
                 chunk_batches = chunk_table.to_batches()
                 for batch in chunk_batches:
