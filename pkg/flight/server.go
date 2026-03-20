@@ -12,6 +12,7 @@ import (
 	"log"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/flight"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
 )
@@ -42,8 +43,9 @@ func (s *LRSFlightServer) DoExchange(stream flight.FlightService_DoExchangeServe
 
 	// Define a struct for the expected JSON metadata
 	type Action struct {
-		Operation string `json:"operation"`
-		CRS       string `json:"crs"`
+		Operation      string            `json:"operation"`
+		CRS            string            `json:"crs"`
+		ColumnMappings map[string]string `json:"column_mappings"`
 	}
 
 	var action Action
@@ -71,17 +73,48 @@ func (s *LRSFlightServer) DoExchange(stream flight.FlightService_DoExchangeServe
 	}
 
 	fmt.Printf("Operation: %s, CRS: %s\n", operation, crs)
+	if action.ColumnMappings != nil {
+		fmt.Printf("Column Mappings: %v\n", action.ColumnMappings)
+	}
 
 	switch operation {
 	case "calculate_m_value":
-		return s.handleCalculateMValue(stream, desc, crs)
+		return s.handleCalculateMValue(stream, desc, crs, action.ColumnMappings)
 	default:
 		return fmt.Errorf("unsupported operation: %s", operation)
 	}
 }
 
-func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoExchangeServer, firstData *flight.FlightData, crs string) error {
+func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoExchangeServer, firstData *flight.FlightData, crs string, columnMappings map[string]string) error {
 	ctx := stream.Context()
+
+	// Get column mappings with defaults
+	routeIDCol := "ROUTEID"
+	latCol := "LAT"
+	lonCol := "LON"
+	mValueCol := "MVAL"
+	distanceCol := "dist_to_line"
+
+	if columnMappings != nil {
+		if v, ok := columnMappings["route_id"]; ok && v != "" {
+			routeIDCol = v
+		}
+		if v, ok := columnMappings["latitude"]; ok && v != "" {
+			latCol = v
+		}
+		if v, ok := columnMappings["longitude"]; ok && v != "" {
+			lonCol = v
+		}
+		if v, ok := columnMappings["m_value"]; ok && v != "" {
+			mValueCol = v
+		}
+		if v, ok := columnMappings["distance"]; ok && v != "" {
+			distanceCol = v
+		}
+	}
+
+	fmt.Printf("Using column mappings - route_id: %s, lat: %s, lon: %s, m_value: %s, distance: %s\n",
+		routeIDCol, latCol, lonCol, mValueCol, distanceCol)
 
 	// Implementation note: Arrow Flight RecordReader is usually the way to go
 	reader, err := flight.NewRecordReader(stream)
@@ -105,6 +138,13 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 	for reader.Next() {
 		rec := reader.RecordBatch()
 		rec.Retain()
+
+		// Rename columns to standard names if needed
+		rec, err = renameRecordColumns(rec, routeIDCol, latCol, lonCol)
+		if err != nil {
+			return fmt.Errorf("failed to rename record columns: %v", err)
+		}
+
 		records = append(records, rec)
 
 		log.Printf("Received record batch with size of %d", rec.NumRows())
@@ -183,6 +223,10 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 		defer events.Release()
 	}
 
+	// Set output column names based on column mappings
+	events.SetMValueColumn(mValueCol)
+	events.SetDistanceToLRSColumn(distanceCol)
+
 	// Check if events need to be materialized (loaded from file)
 	if events.IsMaterialized() {
 		if err := events.LoadToBuffer(); err != nil {
@@ -209,6 +253,10 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 		if err != nil {
 			return fmt.Errorf("failed to sink transformed events: %v", err)
 		}
+
+		// Re-apply output column names after sink
+		events.SetMValueColumn(mValueCol)
+		events.SetDistanceToLRSColumn(distanceCol)
 	}
 
 	// Get Route IDs from events to fetch LRS data
@@ -232,6 +280,10 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 	}
 	defer resultEvents.Release()
 
+	// Apply output column names to result
+	resultEvents.SetMValueColumn(mValueCol)
+	resultEvents.SetDistanceToLRSColumn(distanceCol)
+
 	// Stream back the results
 	// Use flight.Writer to handle the complexity of Arrow Flight data framing
 	writer := flight.NewRecordWriter(stream, ipc.WithSchema(resultEvents.GetRecords()[0].Schema()))
@@ -244,4 +296,43 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 	}
 
 	return nil
+}
+
+// renameRecordColumns renames route_id, lat, lon columns to standard names
+func renameRecordColumns(rec arrow.RecordBatch, routeIDCol, latCol, lonCol string) (arrow.RecordBatch, error) {
+	schema := rec.Schema()
+	fieldNames := schema.Fields()
+	numCols := len(fieldNames)
+
+	// If no renaming needed, return original
+	if routeIDCol == "ROUTEID" && latCol == "LAT" && lonCol == "LON" {
+		return rec, nil
+	}
+
+	// Build column name mapping
+	colMap := make(map[string]string)
+	colMap[routeIDCol] = "ROUTEID"
+	colMap[latCol] = "LAT"
+	colMap[lonCol] = "LON"
+
+	// Build new schema and columns
+	newFields := make([]arrow.Field, numCols)
+	newColumns := make([]arrow.Array, numCols)
+
+	for i, field := range fieldNames {
+		newName := field.Name
+		if renamed, ok := colMap[field.Name]; ok {
+			newName = renamed
+		}
+		newFields[i] = arrow.Field{
+			Name: newName,
+			Type: field.Type,
+		}
+		newColumns[i] = rec.Column(i)
+	}
+
+	newSchema := arrow.NewSchema(newFields, nil)
+
+	// Create new record batch with renamed columns
+	return array.NewRecordBatch(newSchema, newColumns, rec.NumRows()), nil
 }
