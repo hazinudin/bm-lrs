@@ -35,7 +35,15 @@ def main():
         print(f"Total rows in {input_file}: {total_rows}")
 
         # Prepare metadata for DoExchange
-        action = {"operation": "calculate_m_value", "crs": 'EPSG:4326'}
+        action = {
+            "operation": "calculate_m_value", 
+            "crs": 'EPSG:4326',
+            "columns_mapping": {
+                "route_id": "ROUTEID",
+                "latitude": "LAT",
+                "longitude": "LON"
+            }
+        }
         descriptor = flight.FlightDescriptor.for_command(
             json.dumps(action).encode("utf-8")
         )
@@ -76,12 +84,12 @@ def main():
 
             # Extract LINKID as ROUTEID (split at first underscore if needed)
             # For RNI data, LINKID is used as route identifier
-            data["ROUTEID"] = data["LINKID"].astype(str)
+            data["ROUTEID"] = data["ROUTEID"].astype(str)
 
             # # Rename columns to match server expectations
             # # Cast to float to ensure consistent precision across chunks
-            data["LAT"] = data["TO_STA_LAT"].astype(float)
-            data["LON"] = data["TO_STA_LONG"].astype(float)
+            data["LAT"] = data["LAT"].astype(float)
+            data["LON"] = data["LON"].astype(float)
 
             # # Keep only the columns the server expects: ROUTEID, LAT, LON
             # # This ensures the server returns a consistent schema
