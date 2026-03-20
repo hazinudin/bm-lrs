@@ -3,6 +3,7 @@ from typing import Union
 import pyarrow.flight as pa_flight
 import pyarrow as pa
 import polars as pl
+import pandas as pd
 
 from .exceptions import LRSConnectionError, LRSValidationError, LRSServerError
 from .models import ColumnMapping, LRSResponse
@@ -24,7 +25,7 @@ class LRSClient:
 
     def calculate_m_value(
         self,
-        df: Union[pl.DataFrame, pa.Table],
+        df: Union[pl.DataFrame, pa.Table, pd.DataFrame],
         column_mapping: ColumnMapping | None = None,
         crs: str = "EPSG:4326",
     ) -> Union[pl.DataFrame, pa.Table]:
@@ -38,6 +39,11 @@ class LRSClient:
             df = column_mapping.rename_to_standard(df)
             table = df.to_arrow()
             input_is_polars = True
+        elif isinstance(df, pl.DataFrame):
+            df = pl.from_pandas(df)
+            df = column_mapping.rename_to_standard(df)
+            table = df.to_arrow()
+            input_is_polars = True # Currently only returns polars dataframe.
         else:
             table = df
             input_is_polars = False
