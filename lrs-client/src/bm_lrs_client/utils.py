@@ -19,6 +19,8 @@ def build_request_message(crs: str, column_mapping: ColumnMapping) -> bytes:
             "route_id": column_mapping.route_id,
             "latitude": column_mapping.latitude,
             "longitude": column_mapping.longitude,
+            "m_value": column_mapping.m_value,
+            "distance": column_mapping.distance,
         },
     }
     return json.dumps(message).encode("utf-8")

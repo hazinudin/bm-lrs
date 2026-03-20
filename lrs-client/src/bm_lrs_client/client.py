@@ -36,20 +36,19 @@ class LRSClient:
         if not validate_crs(crs):
             raise LRSValidationError(f"Invalid CRS format: {crs}")
 
+        input_is_polars = False
+
         if isinstance(df, pl.DataFrame):
-            df = column_mapping.rename_to_standard(df)
-            table = df.to_arrow()
             input_is_polars = True
-        elif isinstance(df, pl.DataFrame):
-            df = pl.from_pandas(df)
-            df = column_mapping.rename_to_standard(df)
             table = df.to_arrow()
-            input_is_polars = True # Currently only returns polars dataframe.
+        elif isinstance(df, pd.DataFrame):
+            df = pl.from_pandas(df)
+            input_is_polars = True
+            table = df.to_arrow()
         else:
             table = df
-            input_is_polars = False
 
-        ColumnMapping().validate(table)
+        column_mapping.validate(table)
 
         if self._client is None:
             self.connect()
@@ -62,15 +61,32 @@ class LRSClient:
             options = pa_flight.FlightCallOptions()
             writer, reader = self._client.do_exchange(descriptor, options=options)
 
-            input_schema = pa.schema(
-                [
-                    pa.field("ROUTEID", pa.string()),
-                    pa.field("LAT", pa.float64()),
-                    pa.field("LON", pa.float64()),
-                ]
-            )
+            input_schema_fields = [
+                pa.field(column_mapping.route_id, pa.string()),
+                pa.field(column_mapping.latitude, pa.float64()),
+                pa.field(column_mapping.longitude, pa.float64()),
+            ]
+            for col in table.column_names:
+                if col not in [
+                    column_mapping.route_id,
+                    column_mapping.latitude,
+                    column_mapping.longitude,
+                ]:
+                    col_type = table.schema.field(col).type
+                    input_schema_fields.append(pa.field(col, col_type))
 
-            table = table.select(["ROUTEID", "LAT", "LON"])
+            input_schema = pa.schema(input_schema_fields)
+
+            required_cols = [
+                column_mapping.route_id,
+                column_mapping.latitude,
+                column_mapping.longitude,
+            ]
+            for col in table.column_names:
+                if col not in required_cols:
+                    required_cols.append(col)
+
+            table = table.select(required_cols)
             table = table.cast(input_schema)
             writer.begin(input_schema)
 
@@ -103,8 +119,7 @@ class LRSClient:
             )
 
             if input_is_polars:
-                result = response.to_polars()
-                return column_mapping.rename_from_standard(result)
+                return response.to_polars()
             return response.to_pyarrow()
 
         except LRSValidationError:

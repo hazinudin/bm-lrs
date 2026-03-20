@@ -41,6 +41,12 @@ class ColumnMapping:
 
     def rename_from_standard(self, df: pl.DataFrame) -> pl.DataFrame:
         rename_map = {}
+        if self.route_id != "ROUTEID":
+            rename_map["ROUTEID"] = self.route_id
+        if self.latitude != "LAT":
+            rename_map["LAT"] = self.latitude
+        if self.longitude != "LON":
+            rename_map["LON"] = self.longitude
         if self.m_value != "MVAL":
             rename_map["MVAL"] = self.m_value
         if self.distance != "dist_to_line":

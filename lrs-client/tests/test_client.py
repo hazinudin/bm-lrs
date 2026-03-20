@@ -51,18 +51,20 @@ class TestLRSClient(unittest.TestCase):
 
         mock_writer = MagicMock()
         mock_reader = MagicMock()
-        mock_reader.read_chunk.side_effect = [
-            pa.RecordBatch.from_pydict(
-                {
-                    "ROUTEID": ["R1"],
-                    "LAT": [1.0],
-                    "LON": [100.0],
-                    "MVAL": [123.5],
-                    "dist_to_line": [0.1],
-                }
-            ),
-            None,
-        ]
+        record_batch = pa.RecordBatch.from_pydict(
+            {
+                "point_id": [0],
+                "ROUTEID": ["R1"],
+                "LAT": [1.0],
+                "LON": [100.0],
+                "MVAL": [123.5],
+                "dist_to_line": [0.1],
+            }
+        )
+        flight_chunk = MagicMock()
+        flight_chunk.data = record_batch
+        flight_chunk.app_metadata = None
+        mock_reader.__iter__ = lambda self: iter([flight_chunk])
 
         with patch("bm_lrs_client.client.pa_flight.FlightClient") as mock_flight_client:
             mock_instance = MagicMock()
@@ -87,18 +89,20 @@ class TestLRSClient(unittest.TestCase):
 
         mock_writer = MagicMock()
         mock_reader = MagicMock()
-        mock_reader.read_chunk.side_effect = [
-            pa.RecordBatch.from_pydict(
-                {
-                    "ROUTEID": ["R1"],
-                    "LAT": [1.0],
-                    "LON": [100.0],
-                    "MVAL": [123.5],
-                    "dist_to_line": [0.1],
-                }
-            ),
-            StopIteration(),
-        ]
+        record_batch = pa.RecordBatch.from_pydict(
+            {
+                "point_id": [0],
+                "LINKID": ["R1"],
+                "Y": [1.0],
+                "X": [100.0],
+                "MEASURE": [123.5],
+                "DIST": [0.1],
+            }
+        )
+        flight_chunk = MagicMock()
+        flight_chunk.data = record_batch
+        flight_chunk.app_metadata = None
+        mock_reader.__iter__ = lambda self: iter([flight_chunk])
 
         with patch("bm_lrs_client.client.pa_flight.FlightClient") as mock_flight_client:
             mock_instance = MagicMock()
