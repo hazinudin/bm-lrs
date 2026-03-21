@@ -27,6 +27,24 @@ func NewLRSFlightServer(repo *route.LRSRouteRepository) *LRSFlightServer {
 	}
 }
 
+// ColumnMappings specifies custom column names for the operation
+type ColumnMappings struct {
+	RouteID   *string `json:"route_id,omitempty"`
+	Latitude  *string `json:"latitude,omitempty"`
+	Longitude *string `json:"longitude,omitempty"`
+	MValue    *string `json:"m_value,omitempty"`
+	Distance  *string `json:"distance,omitempty"`
+}
+
+// Action represents the operation metadata
+type Action struct {
+	Operation string `json:"operation"`
+	CRS       string `json:"crs"`
+
+	// Optional column mappings
+	ColumnMappings *ColumnMappings `json:"column_mappings,omitempty"`
+}
+
 func (s *LRSFlightServer) DoExchange(stream flight.FlightService_DoExchangeServer) error {
 	desc, err := stream.Recv()
 	if err != nil {
@@ -39,12 +57,6 @@ func (s *LRSFlightServer) DoExchange(stream flight.FlightService_DoExchangeServe
 	// Parse the operation and CRS from AppMetadata
 	var operation string
 	crs := "EPSG:4326" // Default CRS
-
-	// Define a struct for the expected JSON metadata
-	type Action struct {
-		Operation string `json:"operation"`
-		CRS       string `json:"crs"`
-	}
 
 	var action Action
 	// Try parsing as JSON first
@@ -74,13 +86,13 @@ func (s *LRSFlightServer) DoExchange(stream flight.FlightService_DoExchangeServe
 
 	switch operation {
 	case "calculate_m_value":
-		return s.handleCalculateMValue(stream, desc, crs)
+		return s.handleCalculateMValue(stream, desc, crs, action.ColumnMappings)
 	default:
 		return fmt.Errorf("unsupported operation: %s", operation)
 	}
 }
 
-func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoExchangeServer, firstData *flight.FlightData, crs string) error {
+func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoExchangeServer, firstData *flight.FlightData, crs string, colMappings *ColumnMappings) error {
 	ctx := stream.Context()
 
 	// Implementation note: Arrow Flight RecordReader is usually the way to go
@@ -138,6 +150,18 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 	var events *route_event.LRSEvents
 	var err2 error
 
+	// Create LRSEventsOptions from column mappings
+	var opts *route_event.LRSEventsOptions
+	if colMappings != nil {
+		opts = &route_event.LRSEventsOptions{
+			RouteID:   colMappings.RouteID,
+			Latitude:  colMappings.Latitude,
+			Longitude: colMappings.Longitude,
+			MValue:    colMappings.MValue,
+			Distance:  colMappings.Distance,
+		}
+	}
+
 	// If we wrote parquet files, merge them and create LRSEvents from file
 	if len(handler.currentFiles) > 0 {
 		// Write any remaining records to parquet
@@ -160,8 +184,12 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 
 		log.Printf("Merged parquet file created at: %s", mergedPath)
 
-		// Create LRSEvents from merged parquet file
-		events, err2 = route_event.NewLRSEventsFromFile(mergedPath, crs)
+		// Create LRSEvents from merged parquet file with optional column mappings
+		if opts != nil {
+			events, err2 = route_event.NewLRSEventsFromFileWithOptions(mergedPath, crs, *opts)
+		} else {
+			events, err2 = route_event.NewLRSEventsFromFile(mergedPath, crs)
+		}
 
 		log.Printf("Merge file contains %d routes", len(events.GetRouteIDs()))
 
@@ -175,8 +203,12 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 			return fmt.Errorf("no records received")
 		}
 
-		// Create LRSEvents from records
-		events, err2 = route_event.NewLRSEvents(records, crs)
+		// Create LRSEvents from records with optional column mappings
+		if opts != nil {
+			events, err2 = route_event.NewLRSEventsWithOptions(records, crs, *opts)
+		} else {
+			events, err2 = route_event.NewLRSEvents(records, crs)
+		}
 		if err2 != nil {
 			return fmt.Errorf("error when creating new LRSEvents: %v", err2)
 		}
@@ -192,13 +224,27 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 
 	// Check the Events CRS
 	if events.GetCRS() != geom.LAMBERT_WKT {
-		transformedEvents, err := projection.Transform(events, geom.LAMBERT_WKT, false)
+		// Convert ColumnMappings to geom.ColumnMappings for Transform function
+		var geomColMappings *geom.ColumnMappings
+		if colMappings != nil {
+			geomColMappings = &geom.ColumnMappings{
+				Latitude:  colMappings.Latitude,
+				Longitude: colMappings.Longitude,
+			}
+		}
+
+		transformedEvents, err := projection.Transform(events, geom.LAMBERT_WKT, false, geomColMappings)
 		if err != nil {
 			return err
 		}
 		defer transformedEvents.Release()
 
-		events, err = route_event.NewLRSEvents(transformedEvents.GetRecords(), geom.LAMBERT_WKT)
+		// Create LRSEvents from transformed records with column mappings
+		if opts != nil {
+			events, err = route_event.NewLRSEventsWithOptions(transformedEvents.GetRecords(), geom.LAMBERT_WKT, *opts)
+		} else {
+			events, err = route_event.NewLRSEvents(transformedEvents.GetRecords(), geom.LAMBERT_WKT)
+		}
 		if err != nil {
 			return fmt.Errorf("error creating LRSEvents after transformation: %v", err)
 		}

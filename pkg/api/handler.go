@@ -80,7 +80,7 @@ func (h *APIHandler) CalculateMValueHandler(w http.ResponseWriter, r *http.Reque
 	start = time.Now()
 	var processedEvents *route_event.LRSEvents
 	if events.GetCRS() != geom.LAMBERT_WKT {
-		transformedGeom, err := projection.Transform(events, geom.LAMBERT_WKT, false)
+		transformedGeom, err := projection.Transform(events, geom.LAMBERT_WKT, false, nil)
 		if err != nil {
 			h.sendError(w, http.StatusInternalServerError, fmt.Sprintf("failed to transform projection: %v", err))
 			return
