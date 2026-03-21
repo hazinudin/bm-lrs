@@ -154,16 +154,18 @@ func calculatePointsMValueNew(ctx context.Context, lrs route.LRSRouteInterface, 
 	query := fmt.Sprintf(`
 	SELECT 
 		p.* EXCLUDE (%s),
-		ST_InterpolatePoint(b.linestr, ST_Point(%s, %s)) as "%s",
-		ST_Distance(b.linestr, ST_Point(%s, %s)) as dist_to_line
+		ST_InterpolatePoint(b.linestr, ST_Point("%s", "%s")) as "%s",
+		ST_Distance(b.linestr, ST_Point("%s", "%s")) as "%s"
 	FROM points_table p
-	JOIN lrs_line_table b ON p.ROUTEID = b.ROUTEID
+	JOIN lrs_line_table b ON p."%s" = b.ROUTEID
 	ORDER BY p.point_id
 	`,
 		excludeClause,
 		points.LongitudeColumn(), points.LatitudeColumn(),
 		points.MValueColumn(),
-		points.LongitudeColumn(), points.LatitudeColumn())
+		points.LongitudeColumn(), points.LatitudeColumn(),
+		points.DistanceToLRSColumn(),
+		points.RouteIDColumn())
 
 	// Debug: check counts
 	var pointsCount, lrsLineCount, lrsSegmentCount int
@@ -189,12 +191,23 @@ func calculatePointsMValueNew(ctx context.Context, lrs route.LRSRouteInterface, 
 		return nil, fmt.Errorf("expected records, got 0. Counts: points=%d, lrs_line=%d, lrs_segment=%d", pointsCount, lrsLineCount, lrsSegmentCount)
 	}
 
-	out, err := route_event.NewLRSEvents(outRecs, points.GetCRS())
+	// Preserve column names from input points
+	out, err := route_event.NewLRSEventsWithOptions(outRecs, points.GetCRS(), route_event.LRSEventsOptions{
+		RouteID:   strPtr(points.RouteIDColumn()),
+		Latitude:  strPtr(points.LatitudeColumn()),
+		Longitude: strPtr(points.LongitudeColumn()),
+		MValue:    strPtr(points.MValueColumn()),
+		Distance:  strPtr(points.DistanceToLRSColumn()),
+	})
 	if err != nil {
 		return nil, err
 	}
 
 	return out, nil
+}
+
+func strPtr(s string) *string {
+	return &s
 }
 
 // calculatePointsMValueOriginal implements M-value interpolation using CTEs.
@@ -327,12 +340,12 @@ func calculatePointsMValueOriginal(ctx context.Context, lrs route.LRSRouteInterf
 	query := fmt.Sprintf(`
 	WITH shortest_to_lrs AS (
 		SELECT
-			a.ROUTEID,
+			a."%s" as ROUTEID,
 			point_id, 
 			ST_ShortestLine(ST_Point("%s", "%s"), linestr) AS shortestline
 		FROM points_table a 
 		JOIN lrs_line_table b
-		ON a.ROUTEID = b.ROUTEID
+		ON a."%s" = b.ROUTEID
 	),
 	point_on_line AS (
 		SELECT
@@ -372,18 +385,20 @@ func calculatePointsMValueOriginal(ctx context.Context, lrs route.LRSRouteInterf
 	SELECT 
 		p.* EXCLUDE (%s), 
 		COALESCE(i.m_val, 0) as "%s",
-		i.dist as dist_to_line
+		i.dist as "%s"
 	FROM points_table p
 	LEFT JOIN best_interpolated i ON p.point_id = i.point_id
 	ORDER BY p.point_id
 	`,
+		points.RouteIDColumn(),
 		points.LatitudeColumn(), points.LongitudeColumn(),
+		points.RouteIDColumn(),
 		lrs.MValueColumn(), lrs.MValueColumn(),
 		lrs.LatitudeColumn(), lrs.LongitudeColumn(),
 		lrs.LatitudeColumn(), lrs.LongitudeColumn(),
 		lrs.LongitudeColumn(), lrs.LongitudeColumn(), lrs.LongitudeColumn(), lrs.LongitudeColumn(),
 		lrs.LatitudeColumn(), lrs.LatitudeColumn(), lrs.LatitudeColumn(), lrs.LatitudeColumn(),
-		excludeClause, points.MValueColumn())
+		excludeClause, points.MValueColumn(), points.DistanceToLRSColumn())
 
 	// Debug: check counts
 	var pointsCount, lrsLineCount, lrsSegmentCount int
@@ -409,7 +424,14 @@ func calculatePointsMValueOriginal(ctx context.Context, lrs route.LRSRouteInterf
 		return nil, fmt.Errorf("expected records, got 0. Counts: points=%d, lrs_line=%d, lrs_segment=%d", pointsCount, lrsLineCount, lrsSegmentCount)
 	}
 
-	out, err := route_event.NewLRSEvents(outRecs, points.GetCRS())
+	// Preserve column names from input points
+	out, err := route_event.NewLRSEventsWithOptions(outRecs, points.GetCRS(), route_event.LRSEventsOptions{
+		RouteID:   strPtr(points.RouteIDColumn()),
+		Latitude:  strPtr(points.LatitudeColumn()),
+		Longitude: strPtr(points.LongitudeColumn()),
+		MValue:    strPtr(points.MValueColumn()),
+		Distance:  strPtr(points.DistanceToLRSColumn()),
+	})
 	if err != nil {
 		return nil, err
 	}

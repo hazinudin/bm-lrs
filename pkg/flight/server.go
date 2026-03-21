@@ -12,7 +12,6 @@ import (
 	"log"
 
 	"github.com/apache/arrow-go/v18/arrow"
-	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/flight"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
 )
@@ -99,22 +98,6 @@ func (s *LRSFlightServer) DoExchange(stream flight.FlightService_DoExchangeServe
 func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoExchangeServer, firstData *flight.FlightData, crs string, colMappings *ColumnMappings) error {
 	ctx := stream.Context()
 
-	// Get column names from mappings or use defaults
-	routeIDCol := "ROUTEID"
-	latCol := "LAT"
-	lonCol := "LON"
-	if colMappings != nil {
-		if colMappings.RouteID != nil && *colMappings.RouteID != "" {
-			routeIDCol = *colMappings.RouteID
-		}
-		if colMappings.Latitude != nil && *colMappings.Latitude != "" {
-			latCol = *colMappings.Latitude
-		}
-		if colMappings.Longitude != nil && *colMappings.Longitude != "" {
-			lonCol = *colMappings.Longitude
-		}
-	}
-
 	// Implementation note: Arrow Flight RecordReader is usually the way to go
 	reader, err := flight.NewRecordReader(stream)
 	if err != nil {
@@ -137,12 +120,6 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 	for reader.Next() {
 		rec := reader.RecordBatch()
 		rec.Retain()
-
-		// Rename columns to standard names if needed
-		rec, err = renameRecordColumns(rec, routeIDCol, latCol, lonCol)
-		if err != nil {
-			return fmt.Errorf("failed to rename record columns: %v", err)
-		}
 
 		records = append(records, rec)
 
@@ -251,15 +228,25 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 
 	// Check the Events CRS
 	if events.GetCRS() != geom.LAMBERT_WKT {
-		// Columns have already been renamed to LAT/LON, so pass nil mappings
-		transformedEvents, err := projection.Transform(events, geom.LAMBERT_WKT, false, nil)
+		// Pass column names to Transform so it uses the correct columns
+		geomColMappings := &geom.ColumnMappings{
+			Latitude:  strPtr(events.LatitudeColumn()),
+			Longitude: strPtr(events.LongitudeColumn()),
+		}
+		transformedEvents, err := projection.Transform(events, geom.LAMBERT_WKT, false, geomColMappings)
 		if err != nil {
 			return err
 		}
 		defer transformedEvents.Release()
 
-		// Create LRSEvents from transformed records (columns are already renamed to standard names)
-		events, err = route_event.NewLRSEvents(transformedEvents.GetRecords(), geom.LAMBERT_WKT)
+		// Create LRSEvents from transformed records preserving column names
+		events, err = route_event.NewLRSEventsWithOptions(transformedEvents.GetRecords(), geom.LAMBERT_WKT, route_event.LRSEventsOptions{
+			RouteID:   strPtr(events.RouteIDColumn()),
+			Latitude:  strPtr(events.LatitudeColumn()),
+			Longitude: strPtr(events.LongitudeColumn()),
+			MValue:    strPtr(events.MValueColumn()),
+			Distance:  strPtr(events.DistanceToLRSColumn()),
+		})
 		if err != nil {
 			return fmt.Errorf("error creating LRSEvents after transformation: %v", err)
 		}
@@ -275,7 +262,7 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 	// Get Route IDs from events to fetch LRS data
 	routeIDs := events.GetRouteIDs()
 	if len(routeIDs) == 0 {
-		return fmt.Errorf("no ROUTEID found in records")
+		return fmt.Errorf("no route IDs found in records")
 	}
 
 	fmt.Printf("Found %d unique route IDs\n", len(routeIDs))
@@ -307,41 +294,6 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 	return nil
 }
 
-// renameRecordColumns renames route_id, lat, lon columns to standard names
-func renameRecordColumns(rec arrow.RecordBatch, routeIDCol, latCol, lonCol string) (arrow.RecordBatch, error) {
-	schema := rec.Schema()
-	fieldNames := schema.Fields()
-	numCols := len(fieldNames)
-
-	// If no renaming needed, return original
-	if routeIDCol == "ROUTEID" && latCol == "LAT" && lonCol == "LON" {
-		return rec, nil
-	}
-
-	// Build column name mapping
-	colMap := make(map[string]string)
-	colMap[routeIDCol] = "ROUTEID"
-	colMap[latCol] = "LAT"
-	colMap[lonCol] = "LON"
-
-	// Build new schema and columns
-	newFields := make([]arrow.Field, numCols)
-	newColumns := make([]arrow.Array, numCols)
-
-	for i, field := range fieldNames {
-		newName := field.Name
-		if renamed, ok := colMap[field.Name]; ok {
-			newName = renamed
-		}
-		newFields[i] = arrow.Field{
-			Name: newName,
-			Type: field.Type,
-		}
-		newColumns[i] = rec.Column(i)
-	}
-
-	newSchema := arrow.NewSchema(newFields, nil)
-
-	// Create new record batch with renamed columns
-	return array.NewRecordBatch(newSchema, newColumns, rec.NumRows()), nil
+func strPtr(s string) *string {
+	return &s
 }
