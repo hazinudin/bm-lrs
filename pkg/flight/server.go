@@ -251,27 +251,15 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 
 	// Check the Events CRS
 	if events.GetCRS() != geom.LAMBERT_WKT {
-		// Convert ColumnMappings to geom.ColumnMappings for Transform function
-		var geomColMappings *geom.ColumnMappings
-		if colMappings != nil {
-			geomColMappings = &geom.ColumnMappings{
-				Latitude:  colMappings.Latitude,
-				Longitude: colMappings.Longitude,
-			}
-		}
-
-		transformedEvents, err := projection.Transform(events, geom.LAMBERT_WKT, false, geomColMappings)
+		// Columns have already been renamed to LAT/LON, so pass nil mappings
+		transformedEvents, err := projection.Transform(events, geom.LAMBERT_WKT, false, nil)
 		if err != nil {
 			return err
 		}
 		defer transformedEvents.Release()
 
-		// Create LRSEvents from transformed records with column mappings
-		if opts != nil {
-			events, err = route_event.NewLRSEventsWithOptions(transformedEvents.GetRecords(), geom.LAMBERT_WKT, *opts)
-		} else {
-			events, err = route_event.NewLRSEvents(transformedEvents.GetRecords(), geom.LAMBERT_WKT)
-		}
+		// Create LRSEvents from transformed records (columns are already renamed to standard names)
+		events, err = route_event.NewLRSEvents(transformedEvents.GetRecords(), geom.LAMBERT_WKT)
 		if err != nil {
 			return fmt.Errorf("error creating LRSEvents after transformation: %v", err)
 		}
