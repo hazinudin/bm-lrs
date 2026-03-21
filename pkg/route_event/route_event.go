@@ -52,6 +52,63 @@ func NewLRSEvents(records []arrow.RecordBatch, crs string) (*LRSEvents, error) {
 	return out, nil
 }
 
+// LRSEventsOptions specifies custom column names for LRSEvents creation
+type LRSEventsOptions struct {
+	RouteID   *string
+	Latitude  *string
+	Longitude *string
+	MValue    *string
+	Distance  *string
+}
+
+// NewLRSEventsWithOptions creates LRSEvents with custom column mappings
+func NewLRSEventsWithOptions(records []arrow.RecordBatch, crs string, opts LRSEventsOptions) (*LRSEvents, error) {
+	out := &LRSEvents{
+		records:      records,
+		crs:          crs,
+		materialized: false,
+	}
+
+	// Set custom column mappings or use defaults
+	if opts.RouteID != nil {
+		out.routeIDCol = *opts.RouteID
+	} else {
+		out.routeIDCol = "ROUTEID"
+	}
+
+	if opts.Latitude != nil {
+		out.latCol = *opts.Latitude
+	} else {
+		out.latCol = "LAT"
+	}
+
+	if opts.Longitude != nil {
+		out.lonCol = *opts.Longitude
+	} else {
+		out.lonCol = "LON"
+	}
+
+	if opts.MValue != nil {
+		out.mValCol = *opts.MValue
+	} else {
+		out.mValCol = "MVAL"
+	}
+
+	if opts.Distance != nil {
+		out.distToLRSCol = *opts.Distance
+	} else {
+		out.distToLRSCol = "DIST_TO_LRS"
+	}
+
+	if len(records) > 0 {
+		if err := out.validate(); err != nil {
+			return nil, err
+		}
+	}
+
+	return out, nil
+}
+
 func (e *LRSEvents) validate() error {
 	if len(e.records) == 0 {
 		return nil
@@ -286,6 +343,76 @@ func NewLRSEventsFromFile(filePath string, crs string) (*LRSEvents, error) {
 	lonCol := detectColumn(schema, []string{"LON", "TO_STA_LONG", "longitude", "lon"})
 	mValCol := detectColumn(schema, []string{"MVAL", "MVAL", "m", "m_value"})
 	distToLRSCol := detectColumn(schema, []string{"DIST_TO_LRS", "dist_to_lrs", "distance"})
+
+	// Make a copy of the file path on the heap
+	filePathCopy := filePath
+
+	out := &LRSEvents{
+		routeIDCol:   routeIDCol,
+		latCol:       latCol,
+		lonCol:       lonCol,
+		mValCol:      mValCol,
+		distToLRSCol: distToLRSCol,
+		records:      nil, // Not loaded yet
+		crs:          crs,
+		sourceFile:   &filePathCopy,
+		materialized: true,
+	}
+
+	return out, nil
+}
+
+// NewLRSEventsFromFileWithOptions creates LRSEvents from a parquet file with custom column mappings
+func NewLRSEventsFromFileWithOptions(filePath string, crs string, opts LRSEventsOptions) (*LRSEvents, error) {
+	// Open the parquet file to read its schema
+	pf, err := file.OpenParquetFile(filePath, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open parquet file: %v", err)
+	}
+	defer pf.Close()
+
+	reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{}, memory.NewGoAllocator())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create arrow reader: %v", err)
+	}
+
+	schema, err := reader.Schema()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read schema: %v", err)
+	}
+
+	// Use custom mappings if provided, otherwise detect from aliases
+	var routeIDCol, latCol, lonCol, mValCol, distToLRSCol string
+
+	if opts.RouteID != nil {
+		routeIDCol = *opts.RouteID
+	} else {
+		routeIDCol = detectColumn(schema, []string{"ROUTEID", "LINKID", "route_id", "id"})
+	}
+
+	if opts.Latitude != nil {
+		latCol = *opts.Latitude
+	} else {
+		latCol = detectColumn(schema, []string{"LAT", "TO_STA_LAT", "latitude", "lat"})
+	}
+
+	if opts.Longitude != nil {
+		lonCol = *opts.Longitude
+	} else {
+		lonCol = detectColumn(schema, []string{"LON", "TO_STA_LONG", "longitude", "lon"})
+	}
+
+	if opts.MValue != nil {
+		mValCol = *opts.MValue
+	} else {
+		mValCol = detectColumn(schema, []string{"MVAL", "MVAL", "m", "m_value"})
+	}
+
+	if opts.Distance != nil {
+		distToLRSCol = *opts.Distance
+	} else {
+		distToLRSCol = detectColumn(schema, []string{"DIST_TO_LRS", "dist_to_lrs", "distance"})
+	}
 
 	// Make a copy of the file path on the heap
 	filePathCopy := filePath

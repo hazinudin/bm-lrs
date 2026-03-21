@@ -11,6 +11,12 @@ const (
 	POINTS GeometryType = "points"
 )
 
+// ColumnMappings specifies custom column names for geometry transformations
+type ColumnMappings struct {
+	Latitude  *string
+	Longitude *string
+}
+
 type Geometry interface {
 	GetCRS() string
 	GetRecords() []arrow.RecordBatch

@@ -13,8 +13,17 @@ import (
 	"github.com/duckdb/duckdb-go/v2"
 )
 
+// getColumnName returns the custom column name if provided, otherwise returns default
+func getColumnName(customCol *string, defaultCol string) string {
+	if customCol != nil && *customCol != "" {
+		return *customCol
+	}
+	return defaultCol
+}
+
 // Transform geometry object to a target CRS
-func Transform(obj geom.Geometry, crs string, inverted bool) (geom.Geometry, error) {
+// Optional: specify custom column names for latitude and longitude
+func Transform(obj geom.Geometry, crs string, inverted bool, colMappings *geom.ColumnMappings) (geom.Geometry, error) {
 	c, err := duckdb.NewConnector("", nil)
 
 	if err != nil {
@@ -81,9 +90,17 @@ func Transform(obj geom.Geometry, crs string, inverted bool) (geom.Geometry, err
 	select * exclude(shape), ST_X(shape) as {{.LongCol}}, ST_Y(shape) as {{.LatCol}} from transformed
 	`
 
+	// Resolve column names from mappings or use defaults
+	latCol := "LAT"
+	longCol := "LON"
+	if colMappings != nil {
+		latCol = getColumnName(colMappings.Latitude, "LAT")
+		longCol = getColumnName(colMappings.Longitude, "LON")
+	}
+
 	data := map[string]string{
-		"LatCol":    "LAT",
-		"LongCol":   "LON",
+		"LatCol":    latCol,
+		"LongCol":   longCol,
 		"OriginCRS": obj.GetCRS(),
 		"TargetCRS": crs,
 	}
