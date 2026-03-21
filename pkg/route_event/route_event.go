@@ -54,11 +54,11 @@ func NewLRSEvents(records []arrow.RecordBatch, crs string) (*LRSEvents, error) {
 
 // LRSEventsOptions specifies custom column names for LRSEvents creation
 type LRSEventsOptions struct {
-	RouteID   *string
-	Latitude  *string
-	Longitude *string
-	MValue    *string
-	Distance  *string
+	RouteID   string
+	Latitude  string
+	Longitude string
+	MValue    string
+	Distance  string
 }
 
 // NewLRSEventsWithOptions creates LRSEvents with custom column mappings
@@ -70,32 +70,32 @@ func NewLRSEventsWithOptions(records []arrow.RecordBatch, crs string, opts LRSEv
 	}
 
 	// Set custom column mappings or use defaults
-	if opts.RouteID != nil {
-		out.routeIDCol = *opts.RouteID
+	if opts.RouteID != "" {
+		out.routeIDCol = opts.RouteID
 	} else {
 		out.routeIDCol = "ROUTEID"
 	}
 
-	if opts.Latitude != nil {
-		out.latCol = *opts.Latitude
+	if opts.Latitude != "" {
+		out.latCol = opts.Latitude
 	} else {
 		out.latCol = "LAT"
 	}
 
-	if opts.Longitude != nil {
-		out.lonCol = *opts.Longitude
+	if opts.Longitude != "" {
+		out.lonCol = opts.Longitude
 	} else {
 		out.lonCol = "LON"
 	}
 
-	if opts.MValue != nil {
-		out.mValCol = *opts.MValue
+	if opts.MValue != "" {
+		out.mValCol = opts.MValue
 	} else {
 		out.mValCol = "MVAL"
 	}
 
-	if opts.Distance != nil {
-		out.distToLRSCol = *opts.Distance
+	if opts.Distance != "" {
+		out.distToLRSCol = opts.Distance
 	} else {
 		out.distToLRSCol = "DIST_TO_LRS"
 	}
@@ -384,32 +384,32 @@ func NewLRSEventsFromFileWithOptions(filePath string, crs string, opts LRSEvents
 	// Use custom mappings if provided, otherwise detect from aliases
 	var routeIDCol, latCol, lonCol, mValCol, distToLRSCol string
 
-	if opts.RouteID != nil {
-		routeIDCol = *opts.RouteID
+	if opts.RouteID != "" {
+		routeIDCol = opts.RouteID
 	} else {
 		routeIDCol = detectColumn(schema, []string{"ROUTEID", "LINKID", "route_id", "id"})
 	}
 
-	if opts.Latitude != nil {
-		latCol = *opts.Latitude
+	if opts.Latitude != "" {
+		latCol = opts.Latitude
 	} else {
 		latCol = detectColumn(schema, []string{"LAT", "TO_STA_LAT", "latitude", "lat"})
 	}
 
-	if opts.Longitude != nil {
-		lonCol = *opts.Longitude
+	if opts.Longitude != "" {
+		lonCol = opts.Longitude
 	} else {
 		lonCol = detectColumn(schema, []string{"LON", "TO_STA_LONG", "longitude", "lon"})
 	}
 
-	if opts.MValue != nil {
-		mValCol = *opts.MValue
+	if opts.MValue != "" {
+		mValCol = opts.MValue
 	} else {
 		mValCol = detectColumn(schema, []string{"MVAL", "MVAL", "m", "m_value"})
 	}
 
-	if opts.Distance != nil {
-		distToLRSCol = *opts.Distance
+	if opts.Distance != "" {
+		distToLRSCol = opts.Distance
 	} else {
 		distToLRSCol = detectColumn(schema, []string{"DIST_TO_LRS", "dist_to_lrs", "distance"})
 	}

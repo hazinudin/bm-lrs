@@ -29,11 +29,11 @@ func NewLRSFlightServer(repo *route.LRSRouteRepository) *LRSFlightServer {
 
 // ColumnMappings specifies custom column names for the operation
 type ColumnMappings struct {
-	RouteID   *string `json:"route_id,omitempty"`
-	Latitude  *string `json:"latitude,omitempty"`
-	Longitude *string `json:"longitude,omitempty"`
-	MValue    *string `json:"m_value,omitempty"`
-	Distance  *string `json:"distance,omitempty"`
+	RouteID   string `json:"route_id,omitempty"`
+	Latitude  string `json:"latitude,omitempty"`
+	Longitude string `json:"longitude,omitempty"`
+	MValue    string `json:"m_value,omitempty"`
+	Distance  string `json:"distance,omitempty"`
 }
 
 // Action represents the operation metadata
@@ -230,8 +230,8 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 	if events.GetCRS() != geom.LAMBERT_WKT {
 		// Pass column names to Transform so it uses the correct columns
 		geomColMappings := &geom.ColumnMappings{
-			Latitude:  strPtr(events.LatitudeColumn()),
-			Longitude: strPtr(events.LongitudeColumn()),
+			Latitude:  events.LatitudeColumn(),
+			Longitude: events.LongitudeColumn(),
 		}
 		transformedEvents, err := projection.Transform(events, geom.LAMBERT_WKT, false, geomColMappings)
 		if err != nil {
@@ -241,11 +241,11 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 
 		// Create LRSEvents from transformed records preserving column names
 		events, err = route_event.NewLRSEventsWithOptions(transformedEvents.GetRecords(), geom.LAMBERT_WKT, route_event.LRSEventsOptions{
-			RouteID:   strPtr(events.RouteIDColumn()),
-			Latitude:  strPtr(events.LatitudeColumn()),
-			Longitude: strPtr(events.LongitudeColumn()),
-			MValue:    strPtr(events.MValueColumn()),
-			Distance:  strPtr(events.DistanceToLRSColumn()),
+			RouteID:   events.RouteIDColumn(),
+			Latitude:  events.LatitudeColumn(),
+			Longitude: events.LongitudeColumn(),
+			MValue:    events.MValueColumn(),
+			Distance:  events.DistanceToLRSColumn(),
 		})
 		if err != nil {
 			return fmt.Errorf("error creating LRSEvents after transformation: %v", err)
@@ -292,8 +292,4 @@ func (s *LRSFlightServer) handleCalculateMValue(stream flight.FlightService_DoEx
 	}
 
 	return nil
-}
-
-func strPtr(s string) *string {
-	return &s
 }

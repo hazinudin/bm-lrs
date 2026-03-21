@@ -13,8 +13,8 @@ const (
 
 // ColumnMappings specifies custom column names for geometry transformations
 type ColumnMappings struct {
-	Latitude  *string
-	Longitude *string
+	Latitude  string
+	Longitude string
 }
 
 type Geometry interface {

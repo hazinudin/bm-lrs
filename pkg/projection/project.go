@@ -14,9 +14,9 @@ import (
 )
 
 // getColumnName returns the custom column name if provided, otherwise returns default
-func getColumnName(customCol *string, defaultCol string) string {
-	if customCol != nil && *customCol != "" {
-		return *customCol
+func getColumnName(customCol string, defaultCol string) string {
+	if customCol != "" {
+		return customCol
 	}
 	return defaultCol
 }

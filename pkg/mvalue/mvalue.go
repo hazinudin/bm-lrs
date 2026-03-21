@@ -193,21 +193,17 @@ func calculatePointsMValueNew(ctx context.Context, lrs route.LRSRouteInterface, 
 
 	// Preserve column names from input points
 	out, err := route_event.NewLRSEventsWithOptions(outRecs, points.GetCRS(), route_event.LRSEventsOptions{
-		RouteID:   strPtr(points.RouteIDColumn()),
-		Latitude:  strPtr(points.LatitudeColumn()),
-		Longitude: strPtr(points.LongitudeColumn()),
-		MValue:    strPtr(points.MValueColumn()),
-		Distance:  strPtr(points.DistanceToLRSColumn()),
+		RouteID:   points.RouteIDColumn(),
+		Latitude:  points.LatitudeColumn(),
+		Longitude: points.LongitudeColumn(),
+		MValue:    points.MValueColumn(),
+		Distance:  points.DistanceToLRSColumn(),
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	return out, nil
-}
-
-func strPtr(s string) *string {
-	return &s
 }
 
 // calculatePointsMValueOriginal implements M-value interpolation using CTEs.
@@ -426,11 +422,11 @@ func calculatePointsMValueOriginal(ctx context.Context, lrs route.LRSRouteInterf
 
 	// Preserve column names from input points
 	out, err := route_event.NewLRSEventsWithOptions(outRecs, points.GetCRS(), route_event.LRSEventsOptions{
-		RouteID:   strPtr(points.RouteIDColumn()),
-		Latitude:  strPtr(points.LatitudeColumn()),
-		Longitude: strPtr(points.LongitudeColumn()),
-		MValue:    strPtr(points.MValueColumn()),
-		Distance:  strPtr(points.DistanceToLRSColumn()),
+		RouteID:   points.RouteIDColumn(),
+		Latitude:  points.LatitudeColumn(),
+		Longitude: points.LongitudeColumn(),
+		MValue:    points.MValueColumn(),
+		Distance:  points.DistanceToLRSColumn(),
 	})
 	if err != nil {
 		return nil, err
