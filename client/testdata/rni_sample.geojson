@@ -1,0 +1,165 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          120.12534864,
+          -5.31801578
+        ]
+      },
+      "properties": {
+        "LINKID": "540182",
+        "FROM_STA": 290,
+        "TO_STA": 300,
+        "LANE_CODE": "R1"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          120.12622649,
+          -5.31816383
+        ]
+      },
+      "properties": {
+        "LINKID": "540182",
+        "FROM_STA": 300,
+        "TO_STA": 310,
+        "LANE_CODE": "L1"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          120.12622649,
+          -5.31816383
+        ]
+      },
+      "properties": {
+        "LINKID": "540182",
+        "FROM_STA": 300,
+        "TO_STA": 310,
+        "LANE_CODE": "R1"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          120.12707218,
+          -5.31790488
+        ]
+      },
+      "properties": {
+        "LINKID": "540182",
+        "FROM_STA": 310,
+        "TO_STA": 320,
+        "LANE_CODE": "L1"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          120.12707218,
+          -5.31790488
+        ]
+      },
+      "properties": {
+        "LINKID": "540182",
+        "FROM_STA": 310,
+        "TO_STA": 320,
+        "LANE_CODE": "R1"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          120.12784369,
+          -5.31745368
+        ]
+      },
+      "properties": {
+        "LINKID": "540182",
+        "FROM_STA": 320,
+        "TO_STA": 330,
+        "LANE_CODE": "L1"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          120.12784369,
+          -5.31745368
+        ]
+      },
+      "properties": {
+        "LINKID": "540182",
+        "FROM_STA": 320,
+        "TO_STA": 330,
+        "LANE_CODE": "R1"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          120.12861121,
+          -5.31699667
+        ]
+      },
+      "properties": {
+        "LINKID": "540182",
+        "FROM_STA": 330,
+        "TO_STA": 340,
+        "LANE_CODE": "L1"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          120.12861121,
+          -5.31699667
+        ]
+      },
+      "properties": {
+        "LINKID": "540182",
+        "FROM_STA": 330,
+        "TO_STA": 340,
+        "LANE_CODE": "R1"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          120.12927649,
+          -5.31640185
+        ]
+      },
+      "properties": {
+        "LINKID": "540182",
+        "FROM_STA": 340,
+        "TO_STA": 350,
+        "LANE_CODE": "L1"
+      }
+    }
+  ]
+}
