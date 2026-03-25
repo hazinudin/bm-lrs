@@ -84,7 +84,7 @@ func TestValidateGeoJSON_ValidInput(t *testing.T) {
 		}]
 	}`)
 
-	err := handler.validateGeoJSON(validGeoJSON)
+	err := handler.validateGeoJSON(validGeoJSON, "ROUTEID")
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
 	}
@@ -102,8 +102,31 @@ func TestValidateGeoJSON_NonPointGeometry(t *testing.T) {
 		}]
 	}`)
 
-	err := handler.validateGeoJSON(invalidGeoJSON)
+	err := handler.validateGeoJSON(invalidGeoJSON, "ROUTEID")
 	if err == nil {
 		t.Error("Expected error for non-Point geometry, got nil")
+	}
+}
+
+func TestValidateGeoJSON_CustomRouteIDProperty(t *testing.T) {
+	handler := NewAPIHandler(nil)
+
+	geoJSON := []byte(`{
+		"type": "FeatureCollection",
+		"features": [{
+			"type": "Feature",
+			"geometry": {"type": "Point", "coordinates": [95.35, 5.50]},
+			"properties": {"LINKID": "01002"}
+		}]
+	}`)
+
+	err := handler.validateGeoJSON(geoJSON, "LINKID")
+	if err != nil {
+		t.Errorf("Expected no error, got: %v", err)
+	}
+
+	err = handler.validateGeoJSON(geoJSON, "ROUTEID")
+	if err == nil {
+		t.Error("Expected error when using wrong route ID property name")
 	}
 }

@@ -223,6 +223,114 @@ func NewLRSEventsFromGeoJSON(data []byte, crs string) (*LRSEvents, error) {
 	return NewLRSEvents([]arrow.RecordBatch{rec}, crs)
 }
 
+// NewLRSEventsFromGeoJSONWithOptions creates LRSEvents from GeoJSON with custom column options
+func NewLRSEventsFromGeoJSONWithOptions(data []byte, crs string, opts LRSEventsOptions) (*LRSEvents, error) {
+	var fc struct {
+		Type     string `json:"type"`
+		Features []struct {
+			Type     string `json:"type"`
+			Geometry struct {
+				Type        string    `json:"type"`
+				Coordinates []float64 `json:"coordinates"`
+			} `json:"geometry"`
+			Properties map[string]any `json:"properties"`
+		} `json:"features"`
+	}
+
+	if err := json.Unmarshal(data, &fc); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal geojson: %w", err)
+	}
+
+	routeIDKey := opts.RouteID
+	if routeIDKey == "" {
+		routeIDKey = "ROUTEID"
+	}
+
+	hasRouteID := false
+	for _, f := range fc.Features {
+		if _, ok := f.Properties[routeIDKey]; ok {
+			hasRouteID = true
+			break
+		}
+	}
+	if !hasRouteID {
+		return nil, fmt.Errorf("required property %q not found in GeoJSON features", routeIDKey)
+	}
+
+	pool := memory.NewGoAllocator()
+
+	propKeys := make(map[string]struct{})
+	for _, f := range fc.Features {
+		for k := range f.Properties {
+			propKeys[k] = struct{}{}
+		}
+	}
+
+	fields := []arrow.Field{
+		{Name: "LAT", Type: arrow.PrimitiveTypes.Float64},
+		{Name: "LON", Type: arrow.PrimitiveTypes.Float64},
+	}
+
+	for k := range propKeys {
+		var fieldType arrow.DataType = arrow.BinaryTypes.String
+		for _, f := range fc.Features {
+			if v, ok := f.Properties[k]; ok && v != nil {
+				switch v.(type) {
+				case float64:
+					fieldType = arrow.PrimitiveTypes.Float64
+				case int, int64:
+					fieldType = arrow.PrimitiveTypes.Int64
+				case bool:
+					fieldType = arrow.FixedWidthTypes.Boolean
+				}
+				break
+			}
+		}
+		fields = append(fields, arrow.Field{Name: k, Type: fieldType})
+	}
+
+	schema := arrow.NewSchema(fields, nil)
+	builder := array.NewRecordBuilder(pool, schema)
+	defer builder.Release()
+
+	for _, f := range fc.Features {
+		lon := f.Geometry.Coordinates[0]
+		lat := f.Geometry.Coordinates[1]
+
+		builder.Field(0).(*array.Float64Builder).Append(lat)
+		builder.Field(1).(*array.Float64Builder).Append(lon)
+
+		for i := 2; i < len(fields); i++ {
+			fieldName := fields[i].Name
+			val, ok := f.Properties[fieldName]
+			if !ok || val == nil {
+				builder.Field(i).AppendNull()
+				continue
+			}
+
+			switch b := builder.Field(i).(type) {
+			case *array.Float64Builder:
+				b.Append(val.(float64))
+			case *array.Int64Builder:
+				if fv, ok := val.(float64); ok {
+					b.Append(int64(fv))
+				} else {
+					b.Append(val.(int64))
+				}
+			case *array.StringBuilder:
+				b.Append(fmt.Sprint(val))
+			case *array.BooleanBuilder:
+				b.Append(val.(bool))
+			default:
+				builder.Field(i).AppendNull()
+			}
+		}
+	}
+
+	rec := builder.NewRecordBatch()
+	return NewLRSEventsWithOptions([]arrow.RecordBatch{rec}, crs, opts)
+}
+
 // GetCRS returns the coordinate reference system of the events
 func (e *LRSEvents) GetCRS() string {
 	return e.crs
