@@ -155,3 +155,70 @@ func TestToGeoJSON_EmptyRecords(t *testing.T) {
 		t.Error("Expected error for empty records, got nil")
 	}
 }
+
+func TestNewLRSEventsFromGeoJSONWithOptions_CustomRouteID(t *testing.T) {
+	geoJSON := []byte(`{
+		"type": "FeatureCollection",
+		"features": [
+			{
+				"type": "Feature",
+				"geometry": {"type": "Point", "coordinates": [95.35, 5.50]},
+				"properties": {"LINKID": "01002", "name": "test"}
+			},
+			{
+				"type": "Feature",
+				"geometry": {"type": "Point", "coordinates": [95.36, 5.51]},
+				"properties": {"LINKID": "01002", "name": "test2"}
+			}
+		]
+	}`)
+
+	opts := LRSEventsOptions{
+		RouteID:  "LINKID",
+		MValue:   "measurement",
+		Distance: "offset",
+	}
+
+	events, err := NewLRSEventsFromGeoJSONWithOptions(geoJSON, "EPSG:4326", opts)
+	if err != nil {
+		t.Fatalf("Failed to create LRSEvents from GeoJSON: %v", err)
+	}
+	defer events.Release()
+
+	if events.RouteIDColumn() != "LINKID" {
+		t.Errorf("Expected RouteID column 'LINKID', got %q", events.RouteIDColumn())
+	}
+
+	if events.MValueColumn() != "measurement" {
+		t.Errorf("Expected MValue column 'measurement', got %q", events.MValueColumn())
+	}
+
+	if events.DistanceToLRSColumn() != "offset" {
+		t.Errorf("Expected Distance column 'offset', got %q", events.DistanceToLRSColumn())
+	}
+
+	routeIDs := events.GetRouteIDs()
+	if len(routeIDs) != 1 || routeIDs[0] != "01002" {
+		t.Errorf("Expected route IDs [01002], got %v", routeIDs)
+	}
+}
+
+func TestNewLRSEventsFromGeoJSONWithOptions_MissingRouteID(t *testing.T) {
+	geoJSON := []byte(`{
+		"type": "FeatureCollection",
+		"features": [{
+			"type": "Feature",
+			"geometry": {"type": "Point", "coordinates": [95.35, 5.50]},
+			"properties": {"name": "test"}
+		}]
+	}`)
+
+	opts := LRSEventsOptions{
+		RouteID: "LINKID",
+	}
+
+	_, err := NewLRSEventsFromGeoJSONWithOptions(geoJSON, "EPSG:4326", opts)
+	if err == nil {
+		t.Error("Expected error for missing route ID property, got nil")
+	}
+}

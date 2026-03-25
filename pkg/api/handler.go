@@ -52,15 +52,27 @@ func (h *APIHandler) CalculateMValueHandler(w http.ResponseWriter, r *http.Reque
 	}
 	defer r.Body.Close()
 
-	// Get CRS from query parameter, default to EPSG:4326
+	// Get CRS and column mappings from query parameters
 	crs := r.URL.Query().Get("crs")
 	if crs == "" {
 		crs = "EPSG:4326"
 	}
 
+	opts := route_event.LRSEventsOptions{
+		RouteID:  r.URL.Query().Get("col_route_id"),
+		MValue:   r.URL.Query().Get("col_m_value"),
+		Distance: r.URL.Query().Get("col_distance"),
+	}
+
+	// Use default route ID property if not provided
+	routeIDProperty := opts.RouteID
+	if routeIDProperty == "" {
+		routeIDProperty = "ROUTEID"
+	}
+
 	start := time.Now()
 	// Validate GeoJSON structure
-	if err := h.validateGeoJSON(body); err != nil {
+	if err := h.validateGeoJSON(body, routeIDProperty); err != nil {
 		h.sendError(w, http.StatusBadRequest, fmt.Sprintf("invalid GeoJSON: %v", err))
 		return
 	}
@@ -68,7 +80,12 @@ func (h *APIHandler) CalculateMValueHandler(w http.ResponseWriter, r *http.Reque
 
 	start = time.Now()
 	// Create LRSEvents from GeoJSON
-	events, err := route_event.NewLRSEventsFromGeoJSON(body, crs)
+	var events *route_event.LRSEvents
+	if opts.RouteID != "" || opts.MValue != "" || opts.Distance != "" {
+		events, err = route_event.NewLRSEventsFromGeoJSONWithOptions(body, crs, opts)
+	} else {
+		events, err = route_event.NewLRSEventsFromGeoJSON(body, crs)
+	}
 	if err != nil {
 		h.sendError(w, http.StatusBadRequest, fmt.Sprintf("failed to parse GeoJSON: %v", err))
 		return
@@ -87,7 +104,7 @@ func (h *APIHandler) CalculateMValueHandler(w http.ResponseWriter, r *http.Reque
 		}
 		defer transformedGeom.Release()
 
-		processedEvents, err = route_event.NewLRSEvents(transformedGeom.GetRecords(), geom.LAMBERT_WKT)
+		processedEvents, err = route_event.NewLRSEventsWithOptions(transformedGeom.GetRecords(), geom.LAMBERT_WKT, opts)
 		if err != nil {
 			h.sendError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create LRSEvents after transformation: %v", err))
 			return
@@ -140,7 +157,7 @@ func (h *APIHandler) CalculateMValueHandler(w http.ResponseWriter, r *http.Reque
 }
 
 // validateGeoJSON validates the basic GeoJSON structure
-func (h *APIHandler) validateGeoJSON(data []byte) error {
+func (h *APIHandler) validateGeoJSON(data []byte, routeIDProperty string) error {
 	var fc struct {
 		Type     string `json:"type"`
 		Features []struct {
@@ -175,8 +192,8 @@ func (h *APIHandler) validateGeoJSON(data []byte) error {
 		if len(f.Geometry.Coordinates) < 2 {
 			return fmt.Errorf("feature %d: Point must have at least 2 coordinates", i)
 		}
-		if _, ok := f.Properties["ROUTEID"]; !ok {
-			return fmt.Errorf("feature %d: missing required ROUTEID property", i)
+		if _, ok := f.Properties[routeIDProperty]; !ok {
+			return fmt.Errorf("feature %d: missing required %s property", i, routeIDProperty)
 		}
 	}
 
