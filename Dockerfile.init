@@ -9,7 +9,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy the rest of the source code
-COPY . .
+COPY pkg ./pkg
+COPY cmd ./cmd
 
 # Build with CGO enabled (required by DuckDB) and the duckdb_arrow tag
 RUN CGO_ENABLED=1 GOARCH=$TARGETARCH go build -tags duckdb_arrow -o /app/lrs-init ./cmd/init
