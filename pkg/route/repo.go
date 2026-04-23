@@ -1,6 +1,7 @@
 package route
 
 import (
+	"bm-lrs/pkg/export"
 	"bm-lrs/pkg/geom"
 	"context"
 	"database/sql"
@@ -819,4 +820,22 @@ func (r *LRSRouteRepository) FetchArcGISFeatures(ctx context.Context, token stri
 	}
 
 	return io.ReadAll(resp.Body)
+}
+
+// ExportRoutesToSHP exports the specified routes as a Shapefile ZIP
+func (r *LRSRouteRepository) ExportRoutesToSHP(ctx context.Context, routeIDs []string) ([]byte, error) {
+	batch, err := r.GetLatestBatchWithRoutes(ctx, routeIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get batch with routes: %w", err)
+	}
+	defer batch.Release()
+
+	linestringQuery := batch.LinestringQuery()
+	if linestringQuery == "" {
+		return nil, fmt.Errorf("no linestring data available for the specified routes")
+	}
+
+	fullQuery := fmt.Sprintf(`SELECT ROUTEID, linestr FROM (%s)`, linestringQuery)
+
+	return export.ExportToSHP(ctx, r.db, fullQuery)
 }
