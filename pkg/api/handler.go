@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -198,6 +199,41 @@ func (h *APIHandler) validateGeoJSON(data []byte, routeIDProperty string) error 
 	}
 
 	return nil
+}
+
+// DownloadSHPHandler handles GET requests to download routes as Shapefile
+func (h *APIHandler) DownloadSHPHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.sendError(w, http.StatusMethodNotAllowed, "only GET method is allowed")
+		return
+	}
+
+	routeIDsParam := r.URL.Query().Get("route_ids")
+	if routeIDsParam == "" {
+		h.sendError(w, http.StatusBadRequest, "route_ids query parameter is required")
+		return
+	}
+
+	routeIDs := strings.Split(routeIDsParam, ",")
+	for i := range routeIDs {
+		routeIDs[i] = strings.TrimSpace(routeIDs[i])
+	}
+
+	if len(routeIDs) == 0 || routeIDs[0] == "" {
+		h.sendError(w, http.StatusBadRequest, "at least one route_id is required")
+		return
+	}
+
+	zipBytes, err := h.repo.ExportRoutesToSHP(r.Context(), routeIDs)
+	if err != nil {
+		h.sendError(w, http.StatusInternalServerError, fmt.Sprintf("failed to export shapefile: %v", err))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"routes_%d.zip\"", time.Now().Unix()))
+	w.WriteHeader(http.StatusOK)
+	w.Write(zipBytes)
 }
 
 // sendError sends an error response as JSON
