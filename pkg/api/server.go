@@ -30,6 +30,7 @@ func (s *APIServer) Start() error {
 
 	// Register routes
 	mux.HandleFunc("/api/v1/calculate-mvalue", handler.CalculateMValueHandler)
+	mux.HandleFunc("/api/v1/download-shp", handler.DownloadSHPHandler)
 
 	// Health check endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
