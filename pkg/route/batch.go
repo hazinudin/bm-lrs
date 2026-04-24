@@ -230,8 +230,13 @@ func (l *LRSRouteBatch) LinestringQuery() string {
 			if len(sf.routes) == 0 {
 				noPushDownFiles = append(noPushDownFiles, sf.filePath)
 			} else if strings.Contains(sf.routes[0], "%") {
-				// Wildcard pattern (e.g., "73%") - use LIKE for province filtering
-				queries = append(queries, fmt.Sprintf(`SELECT ROUTEID, ST_GeomFromWKB(linestr) as linestr FROM "%s" WHERE ROUTEID LIKE '%s'`, sf.filePath, sf.routes[0]))
+				// Wildcard pattern(s) (e.g., "73%", "01%") - use LIKE with OR for province filtering
+				var likeClauses []string
+				for _, pattern := range sf.routes {
+					likeClauses = append(likeClauses, fmt.Sprintf("ROUTEID LIKE '%s'", pattern))
+				}
+				likeClause := strings.Join(likeClauses, " OR ")
+				queries = append(queries, fmt.Sprintf(`SELECT ROUTEID, ST_GeomFromWKB(linestr) as linestr FROM "%s" WHERE %s`, sf.filePath, likeClause))
 			} else {
 				routeList := strings.Join(sf.routes, "','")
 				queries = append(queries, fmt.Sprintf(`SELECT ROUTEID, ST_GeomFromWKB(linestr) as linestr FROM "%s" WHERE ROUTEID IN ['%s']`, sf.filePath, routeList))
