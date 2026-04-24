@@ -237,13 +237,24 @@ func (h *APIHandler) DownloadSHPHandler(w http.ResponseWriter, r *http.Request) 
 
 		zipBytes, err = h.repo.ExportRoutesToSHPByRoutes(r.Context(), routeIDs)
 	} else {
-		province := strings.TrimSpace(provinceParam)
-		if len(province) != 2 {
-			h.sendError(w, http.StatusBadRequest, "province must be exactly 2 characters")
+		provinces := strings.Split(provinceParam, ",")
+		for i := range provinces {
+			provinces[i] = strings.TrimSpace(provinces[i])
+		}
+
+		if len(provinces) == 0 || provinces[0] == "" {
+			h.sendError(w, http.StatusBadRequest, "at least one province is required")
 			return
 		}
 
-		zipBytes, err = h.repo.ExportRoutesToSHPByProvince(r.Context(), province)
+		for _, p := range provinces {
+			if len(p) != 2 {
+				h.sendError(w, http.StatusBadRequest, "each province must be exactly 2 characters")
+				return
+			}
+		}
+
+		zipBytes, err = h.repo.ExportRoutesToSHPByProvinces(r.Context(), provinces)
 	}
 
 	if err != nil {
