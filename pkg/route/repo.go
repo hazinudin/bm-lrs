@@ -707,6 +707,75 @@ func (r *LRSRouteRepository) GetLatestBatchWithRoutes(ctx context.Context, route
 	return batch, nil
 }
 
+// GetLatestBatchByProvince retrieves all route data for a province (first 2 chars of ROUTEID)
+// as an LRSRouteBatch with pushdown enabled for matching routes.
+func (r *LRSRouteRepository) GetLatestBatchByProvince(ctx context.Context, province string) (*LRSRouteBatch, error) {
+	// Install postgres extension
+	if _, err := r.db.ExecContext(ctx, "INSTALL postgres; LOAD postgres;"); err != nil {
+		return nil, fmt.Errorf("failed to load postgres extension: %w", err)
+	}
+
+	// Attach Postgres
+	_, err := r.db.ExecContext(ctx, fmt.Sprintf("ATTACH IF NOT EXISTS '%s' AS postgres_db (TYPE POSTGRES)", r.pgConnStr))
+	if err != nil {
+		return nil, fmt.Errorf("failed to attach postgres: %w", err)
+	}
+
+	// Query for latest active catalog entry (END_DATE is NULL means active)
+	query := `
+		SELECT LRS_POINT_FILE, LRS_SEGMENT_FILE, LRS_LINESTR_FILE, VERSION
+		FROM postgres_db.lrs_catalogs
+		WHERE END_DATE IS NULL
+		ORDER BY VERSION DESC
+		LIMIT 1
+	`
+	var segmentPath, linestringPath, pointPath string
+	var version int
+	err = r.db.QueryRowContext(ctx, query).Scan(&pointPath, &segmentPath, &linestringPath, &version)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("no active catalog entry found")
+		}
+		return nil, fmt.Errorf("failed to query latest catalog: %w", err)
+	}
+
+	// Create a batch with no-pushdown source files (we'll filter by province in the query)
+	batch := &LRSRouteBatch{
+		latitudeCol:  "LAT",
+		longitudeCol: "LON",
+		mValueCol:    "MVAL",
+		routes:       make(map[string]LRSRoute),
+	}
+
+	// Set up sourceFiles with all routes for pushdown filtering
+	// Province filtering is done via WHERE ROUTEID LIKE 'XX%'
+	batch.sourceFiles = &batchSourceFiles{
+		Point: []sourceFile{
+			{
+				filePath:     pointPath,
+				routes:       []string{province + "%"}, // Used as pattern for LIKE query
+				materialized: true,
+			},
+		},
+		Segment: []sourceFile{
+			{
+				filePath:     segmentPath,
+				routes:       []string{province + "%"},
+				materialized: true,
+			},
+		},
+		LineString: []sourceFile{
+			{
+				filePath:     linestringPath,
+				routes:       []string{province + "%"},
+				materialized: true,
+			},
+		},
+	}
+
+	return batch, nil
+}
+
 // GenerateArcGISToken generates a token for ArcGIS Portal
 func (r *LRSRouteRepository) GenerateArcGISToken(ctx context.Context) (string, error) {
 	username := os.Getenv("ARCGIS_USER")
@@ -822,8 +891,8 @@ func (r *LRSRouteRepository) FetchArcGISFeatures(ctx context.Context, token stri
 	return io.ReadAll(resp.Body)
 }
 
-// ExportRoutesToSHP exports the specified routes as a Shapefile ZIP
-func (r *LRSRouteRepository) ExportRoutesToSHP(ctx context.Context, routeIDs []string) ([]byte, error) {
+// ExportRoutesToSHPByRoutes exports the specified routes as a Shapefile ZIP
+func (r *LRSRouteRepository) ExportRoutesToSHPByRoutes(ctx context.Context, routeIDs []string) ([]byte, error) {
 	batch, err := r.GetLatestBatchWithRoutes(ctx, routeIDs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get batch with routes: %w", err)
@@ -835,7 +904,25 @@ func (r *LRSRouteRepository) ExportRoutesToSHP(ctx context.Context, routeIDs []s
 		return nil, fmt.Errorf("no linestring data available for the specified routes")
 	}
 
-	fullQuery := fmt.Sprintf(`SELECT ROUTEID, linestr FROM (%s)`, linestringQuery)
+	fullQuery := fmt.Sprintf(`SELECT ROUTEID, ST_GeomFromWKB(linestr) as linestr FROM (%s)`, linestringQuery)
+
+	return export.ExportToSHP(ctx, r.db, fullQuery)
+}
+
+// ExportRoutesToSHPByProvince exports all routes in a province as a Shapefile ZIP
+func (r *LRSRouteRepository) ExportRoutesToSHPByProvince(ctx context.Context, province string) ([]byte, error) {
+	batch, err := r.GetLatestBatchByProvince(ctx, province)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get batch for province %s: %w", province, err)
+	}
+	defer batch.Release()
+
+	linestringQuery := batch.LinestringQuery()
+	if linestringQuery == "" {
+		return nil, fmt.Errorf("no linestring data available for province %s", province)
+	}
+
+	fullQuery := fmt.Sprintf(`SELECT ROUTEID, ST_GeomFromWKB(linestr) as linestr FROM (%s)`, linestringQuery)
 
 	return export.ExportToSHP(ctx, r.db, fullQuery)
 }
