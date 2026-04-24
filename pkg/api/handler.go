@@ -209,22 +209,43 @@ func (h *APIHandler) DownloadSHPHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	routeIDsParam := r.URL.Query().Get("route_ids")
-	if routeIDsParam == "" {
-		h.sendError(w, http.StatusBadRequest, "route_ids query parameter is required")
+	provinceParam := r.URL.Query().Get("province")
+
+	if routeIDsParam != "" && provinceParam != "" {
+		h.sendError(w, http.StatusBadRequest, "cannot use both route_ids and province in the same request")
 		return
 	}
 
-	routeIDs := strings.Split(routeIDsParam, ",")
-	for i := range routeIDs {
-		routeIDs[i] = strings.TrimSpace(routeIDs[i])
-	}
-
-	if len(routeIDs) == 0 || routeIDs[0] == "" {
-		h.sendError(w, http.StatusBadRequest, "at least one route_id is required")
+	if routeIDsParam == "" && provinceParam == "" {
+		h.sendError(w, http.StatusBadRequest, "either route_ids or province query parameter is required")
 		return
 	}
 
-	zipBytes, err := h.repo.ExportRoutesToSHP(r.Context(), routeIDs)
+	var zipBytes []byte
+	var err error
+
+	if routeIDsParam != "" {
+		routeIDs := strings.Split(routeIDsParam, ",")
+		for i := range routeIDs {
+			routeIDs[i] = strings.TrimSpace(routeIDs[i])
+		}
+
+		if len(routeIDs) == 0 || routeIDs[0] == "" {
+			h.sendError(w, http.StatusBadRequest, "at least one route_id is required")
+			return
+		}
+
+		zipBytes, err = h.repo.ExportRoutesToSHPByRoutes(r.Context(), routeIDs)
+	} else {
+		province := strings.TrimSpace(provinceParam)
+		if len(province) != 2 {
+			h.sendError(w, http.StatusBadRequest, "province must be exactly 2 characters")
+			return
+		}
+
+		zipBytes, err = h.repo.ExportRoutesToSHPByProvince(r.Context(), province)
+	}
+
 	if err != nil {
 		h.sendError(w, http.StatusInternalServerError, fmt.Sprintf("failed to export shapefile: %v", err))
 		return
