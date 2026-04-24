@@ -776,6 +776,79 @@ func (r *LRSRouteRepository) GetLatestBatchByProvince(ctx context.Context, provi
 	return batch, nil
 }
 
+// GetLatestBatchByProvinces retrieves all route data for multiple provinces as an LRSRouteBatch.
+func (r *LRSRouteRepository) GetLatestBatchByProvinces(ctx context.Context, provinces []string) (*LRSRouteBatch, error) {
+	// Install postgres extension
+	if _, err := r.db.ExecContext(ctx, "INSTALL postgres; LOAD postgres;"); err != nil {
+		return nil, fmt.Errorf("failed to load postgres extension: %w", err)
+	}
+
+	// Attach Postgres
+	_, err := r.db.ExecContext(ctx, fmt.Sprintf("ATTACH IF NOT EXISTS '%s' AS postgres_db (TYPE POSTGRES)", r.pgConnStr))
+	if err != nil {
+		return nil, fmt.Errorf("failed to attach postgres: %w", err)
+	}
+
+	// Query for latest active catalog entry (END_DATE is NULL means active)
+	query := `
+		SELECT LRS_POINT_FILE, LRS_SEGMENT_FILE, LRS_LINESTR_FILE, VERSION
+		FROM postgres_db.lrs_catalogs
+		WHERE END_DATE IS NULL
+		ORDER BY VERSION DESC
+		LIMIT 1
+	`
+	var segmentPath, linestringPath, pointPath string
+	var version int
+	err = r.db.QueryRowContext(ctx, query).Scan(&pointPath, &segmentPath, &linestringPath, &version)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("no active catalog entry found")
+		}
+		return nil, fmt.Errorf("failed to query latest catalog: %w", err)
+	}
+
+	// Create a batch with no-pushdown source files (we'll filter by province in the query)
+	batch := &LRSRouteBatch{
+		latitudeCol:  "LAT",
+		longitudeCol: "LON",
+		mValueCol:    "MVAL",
+		routes:       make(map[string]LRSRoute),
+	}
+
+	// Build patterns for multiple provinces (e.g., "01%", "02%", "44%")
+	var patterns []string
+	for _, p := range provinces {
+		patterns = append(patterns, p+"%")
+	}
+
+	// Set up sourceFiles with wildcard patterns for each province
+	batch.sourceFiles = &batchSourceFiles{
+		Point: []sourceFile{
+			{
+				filePath:     pointPath,
+				routes:       patterns,
+				materialized: true,
+			},
+		},
+		Segment: []sourceFile{
+			{
+				filePath:     segmentPath,
+				routes:       patterns,
+				materialized: true,
+			},
+		},
+		LineString: []sourceFile{
+			{
+				filePath:     linestringPath,
+				routes:       patterns,
+				materialized: true,
+			},
+		},
+	}
+
+	return batch, nil
+}
+
 // GenerateArcGISToken generates a token for ArcGIS Portal
 func (r *LRSRouteRepository) GenerateArcGISToken(ctx context.Context) (string, error) {
 	username := os.Getenv("ARCGIS_USER")
@@ -920,6 +993,24 @@ func (r *LRSRouteRepository) ExportRoutesToSHPByProvince(ctx context.Context, pr
 	linestringQuery := batch.LinestringQuery()
 	if linestringQuery == "" {
 		return nil, fmt.Errorf("no linestring data available for province %s", province)
+	}
+
+	fullQuery := fmt.Sprintf(`SELECT ROUTEID, ST_GeomFromWKB(linestr) as linestr FROM (%s)`, linestringQuery)
+
+	return export.ExportToSHP(ctx, r.db, fullQuery)
+}
+
+// ExportRoutesToSHPByProvinces exports all routes in multiple provinces as a Shapefile ZIP
+func (r *LRSRouteRepository) ExportRoutesToSHPByProvinces(ctx context.Context, provinces []string) ([]byte, error) {
+	batch, err := r.GetLatestBatchByProvinces(ctx, provinces)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get batch for provinces: %w", err)
+	}
+	defer batch.Release()
+
+	linestringQuery := batch.LinestringQuery()
+	if linestringQuery == "" {
+		return nil, fmt.Errorf("no linestring data available for the specified provinces")
 	}
 
 	fullQuery := fmt.Sprintf(`SELECT ROUTEID, ST_GeomFromWKB(linestr) as linestr FROM (%s)`, linestringQuery)
