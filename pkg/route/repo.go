@@ -977,7 +977,7 @@ func (r *LRSRouteRepository) ExportRoutesToSHPByRoutes(ctx context.Context, rout
 		return nil, fmt.Errorf("no linestring data available for the specified routes")
 	}
 
-	fullQuery := fmt.Sprintf(`SELECT ROUTEID, ST_GeomFromWKB(linestr) as linestr FROM (%s)`, linestringQuery)
+	fullQuery := fmt.Sprintf(`SELECT ROUTEID, linestr FROM (%s)`, linestringQuery)
 
 	return export.ExportToSHP(ctx, r.db, fullQuery)
 }
@@ -995,7 +995,7 @@ func (r *LRSRouteRepository) ExportRoutesToSHPByProvince(ctx context.Context, pr
 		return nil, fmt.Errorf("no linestring data available for province %s", province)
 	}
 
-	fullQuery := fmt.Sprintf(`SELECT ROUTEID, ST_GeomFromWKB(linestr) as linestr FROM (%s)`, linestringQuery)
+	fullQuery := fmt.Sprintf(`SELECT ROUTEID, linestr FROM (%s)`, linestringQuery)
 
 	return export.ExportToSHP(ctx, r.db, fullQuery)
 }
@@ -1013,7 +1013,7 @@ func (r *LRSRouteRepository) ExportRoutesToSHPByProvinces(ctx context.Context, p
 		return nil, fmt.Errorf("no linestring data available for the specified provinces")
 	}
 
-	fullQuery := fmt.Sprintf(`SELECT ROUTEID, ST_GeomFromWKB(linestr) as linestr FROM (%s)`, linestringQuery)
+	fullQuery := fmt.Sprintf(`SELECT ROUTEID, linestr FROM (%s)`, linestringQuery)
 
 	return export.ExportToSHP(ctx, r.db, fullQuery)
 }
