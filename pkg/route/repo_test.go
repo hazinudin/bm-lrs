@@ -3,6 +3,7 @@ package route
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -252,7 +253,7 @@ func TestFetchArcGISFeatures(t *testing.T) {
 	repo := &LRSRouteRepository{}
 	repo.arcgisFetchLimit = 250
 	repo.tokenURL = "https://gisportal.binamarga.pu.go.id/portal/sharing/rest/generateToken"
-	repo.featureServiceURL = "https://gisportal.binamarga.pu.go.id/arcgis/rest/services/Jalan/BinaMargaLRS/MapServer/0/query"
+	repo.featureServiceURL = "https://gisportal.binamarga.pu.go.id/arcgis/rest/services/Jalan/Road_Network_National/MapServer/0/query"
 
 	token, err := repo.GenerateArcGISToken(context.Background())
 	if err != nil {
@@ -276,6 +277,51 @@ func TestFetchArcGISFeatures(t *testing.T) {
 		t.Errorf("Expected FeatureCollection in response, got %s", string(data))
 	}
 }
+
+// TestFetchArcGISFeaturesCountOnly replicates the exact call SyncAll makes
+// to fetch the total feature count, and prints the raw response.
+func TestFetchArcGISFeaturesCountOnly(t *testing.T) {
+	repo := &LRSRouteRepository{}
+	repo.arcgisFetchLimit = 10
+	repo.tokenURL = "https://gisportal.binamarga.pu.go.id/portal/sharing/rest/generateToken"
+	repo.featureServiceURL = "https://gisportal.binamarga.pu.go.id/arcgis/rest/services/Jalan/Road_Network_National/MapServer/0/query"
+
+	token, err := repo.GenerateArcGISToken(context.Background())
+	if err != nil {
+		t.Fatalf("failed to generate access token: %v", err)
+	}
+	if token == "" {
+		t.Log("WARNING: token is empty string")
+	}
+	t.Logf("generated token: %s", token)
+
+	countJSON, err := repo.FetchArcGISFeatures(context.Background(), token, []string{}, true, nil)
+	if err != nil {
+		t.Fatalf("failed to fetch count: %v", err)
+	}
+
+	t.Logf("RAW count response: %s", string(countJSON))
+
+	var countResult struct {
+		Count int `json:"count"`
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(countJSON, &countResult); err != nil {
+		t.Fatalf("failed to unmarshal count response: %v", err)
+	}
+	if countResult.Error != nil {
+		t.Errorf("arcgis returned error: %s (code %d)", countResult.Error.Message, countResult.Error.Code)
+	}
+
+	t.Logf("parsed feature count: %d", countResult.Count)
+	if countResult.Count == 0 {
+		t.Log("WARNING: feature count is 0 — this is the condition that panics SyncAll at repo.go:192")
+	}
+}
+
 func TestSync(t *testing.T) {
 	// Setup DuckDB
 	connector, err := duckdb.NewConnector("", nil)

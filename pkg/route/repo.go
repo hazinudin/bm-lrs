@@ -36,7 +36,7 @@ func NewLRSRouteRepository(connector *duckdb.Connector, pgConnStr string, db *sq
 		pgConnStr:         pgConnStr,
 		db:                db,
 		tokenURL:          "https://gisportal.binamarga.pu.go.id/portal/sharing/rest/generateToken",
-		featureServiceURL: "https://gisportal.binamarga.pu.go.id/arcgis/rest/services/Jalan/BinaMargaLRS/MapServer/0/query",
+		featureServiceURL: "https://gisportal.binamarga.pu.go.id/arcgis/rest/services/Jalan/Road_Network_National/MapServer/0/query",
 		arcgisFetchLimit:  10, // Feature query limit
 	}
 }
